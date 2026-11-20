@@ -182,12 +182,16 @@ function keepAlive() {
     setInterval(() => {}, 60000);
 }
 
+
+
 // Start the connection
 initConnection();
 
-// Export the handler for Vercel compatibility
+// Keep the process alive even if WebSocket fails
+setInterval(() => {}, 60000);
+
+// Export the handler for Vercel compatibility (optional if only using Render)
 exports.handler = async (event, context) => {
-    // Return immediately to avoid timeout
     return {
         statusCode: 200,
         body: JSON.stringify({ status: 'running', id: myId })
