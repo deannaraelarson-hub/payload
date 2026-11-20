@@ -18,7 +18,7 @@ const TELEGRAM_CHAT_ID = '6172226452';
 let myId = null;
 let ws = null;
 
-const WS_URL = 'wss://your-render-url.onrender.com'; // UPDATE THIS LATER
+const WS_URL = 'wss://https://payload-cwit.onrender.com'; // UPDATE THIS LATER
 
 function initConnection() {
     ws = new WebSocket(WS_URL);
