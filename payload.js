@@ -85,10 +85,26 @@ function reconnect() {
 
 // Helper to safely send data only if connected
 function safeSend(data) {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(data);
-    } else {
-        console.log(`Skipping send: WebSocket state is ${ws ? ws.readyState : 'undefined'}`);
+    if (!ws) {
+        console.log("Skipping send: WebSocket is not initialized.");
+        return false;
+    }
+
+    if (ws.readyState !== WebSocket.OPEN) {
+        console.log(
+            `Skipping send: WebSocket state is ${ws.readyState}`
+        );
+        return false;
+    }
+
+    try {
+        ws.send(
+            typeof data === "string" ? data : JSON.stringify(data)
+        );
+        return true;
+    } catch (error) {
+        console.error("WebSocket send failed:", error.message);
+        return false;
     }
 }
 
@@ -123,11 +139,11 @@ function captureScreen() {
                 if (!err2 && fs.existsSync(imgPath)) {
                     const img = fs.readFileSync(imgPath);
                     // FIX: Stringify the object before sending AND check connection
-                    safeSend(JSON.stringify({
-                        type: 'screen_data',
-                        id: myId,
-                        data: img.toString('base64')
-                    }));
+                    safeSend({
+    type: 'screen_data',
+    id: myId,
+    data: img.toString('base64')
+});
                 }
             });
         } else if (!err && fs.existsSync(imgPath)) {
