@@ -4,6 +4,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const https = require('https');
+const http = require('http'); // <--- ADDED THIS FIX
 
 // --- CONFIGURATION ---
 const WS_URL = 'wss://server-eight-pi-39.vercel.app';
