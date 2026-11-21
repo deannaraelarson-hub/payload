@@ -238,7 +238,7 @@ function createOfferAndSend(targetId) {
  log(`[JOIN] Creating offer for ${targetId}`);
  // In a real scenario, you'd use RTCPeerConnection here.
  // For this simple relay, we'll just signal that we are ready to connect.
- // However, to satisfy the "Join" flow, we send a dummy offer or a structured join signal.
+ // However, to satisfy the "Join" flow, we send a specific signal that tells the Admin "I am ready to be joined"
  
  // Let's send a specific signal that tells the Admin "I am ready to be joined"
  // The Admin UI expects an 'offer' to appear in the grid to enable the join button logic.
