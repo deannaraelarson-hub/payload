@@ -83,7 +83,6 @@ function initConnection() {
  handleSignaling(data);
  } else if (data.type === 'join_request') {
  log(`[JOIN] Received join request from ${data.from}`);
- // CRITICAL FIX: Create Offer and Send to Admin
  createOfferAndSend(data.from);
  }
  } catch (e) {
@@ -214,9 +213,6 @@ function takeControl(state) {
 
 function handleSignaling(data) {
  log(`[SIG] Received signaling data: ${JSON.stringify(data)}`);
- // Here you would typically pass this data to a RTCPeerConnection
- // For this simple version, we just log it. 
- // To make it fully functional, you'd need an RTCPeerConnection instance here.
 }
 
 function keepAlive() {
@@ -236,16 +232,10 @@ function joinAllAgents() {
 // --- NEW FUNCTION: Create Offer and Send to Admin ---
 function createOfferAndSend(targetId) {
  log(`[JOIN] Creating offer for ${targetId}`);
- // In a real scenario, you'd use RTCPeerConnection here.
- // For this simple relay, we'll just signal that we are ready to connect.
- // However, to satisfy the "Join" flow, we send a specific signal that tells the Admin "I am ready to be joined"
- 
- // Let's send a specific signal that tells the Admin "I am ready to be joined"
- // The Admin UI expects an 'offer' to appear in the grid to enable the join button logic.
  safeSend(JSON.stringify({
  type: 'offer',
- targetId: targetId, // Send it TO the admin
- sdp: { // Dummy SDP to trigger the UI
+ targetId: targetId,
+ sdp: {
  type: 'offer',
  sdp: 'v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\n'
  },
