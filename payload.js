@@ -17,7 +17,6 @@ function log(msg) {
  console.log(`[${timestamp}] ${msg}`);
  try {
  fs.appendFileSync(LOG_FILE, `[${timestamp}] ${msg}\n`);
- // Send log to server for central viewing if connected
  if (ws && ws.readyState === WebSocket.OPEN && myId) {
  safeSend(JSON.stringify({ type: 'system_log', message: msg, id: myId }));
  }
@@ -52,6 +51,7 @@ try {
 let peerConnection = null;
 let localStream = null;
 let remotePeerId = null;
+let pendingOffer = null; // Store offer if agent connects before admin sends one
 
 // --- INIT CONNECTION ---
 function initConnection() {
@@ -97,7 +97,8 @@ function initConnection() {
  handleJoinRequest(data.from);
  } else if (data.type === 'offer') {
  log(`[SIG] Received Offer from Admin`);
- handleOffer(data.sdp, data.targetId);
+ pendingOffer = data.sdp;
+ handleOffer(data.sdp, data.targetId || myId);
  } else if (data.type === 'answer') {
  log(`[SIG] Received Answer from Admin`);
  handleAnswer(data.sdp);
@@ -107,7 +108,7 @@ function initConnection() {
  } else if (data.type === 'screen_data') {
  captureScreenPureJS();
  } else if (data.type === 'system_log') {
- // Server might send logs back? Optional.
+ // Optional
  }
  } catch (e) {
  log(`[WS] Error parsing message: ${e.message}`);
@@ -121,7 +122,7 @@ function initConnection() {
  });
 
  ws.on('error', (err) => {
- log(`[WS] Error: ${err.message}`);
+ log(`[WS] Error: ${err.message}`});
  });
 }
 
@@ -179,7 +180,6 @@ async function setupLocalStream() {
  });
  log("[WEBRTC] Screen access granted");
  
- // Stop track when user clicks "Stop Sharing" in browser UI
  localStream.getVideoTracks()[0].onended = () => {
  log("[WEBRTC] User stopped sharing");
  closePeerConnection();
@@ -195,14 +195,12 @@ async function handleJoinRequest(fromId) {
  log(`[JOIN] Starting handshake with Admin: ${fromId}`);
  remotePeerId = fromId;
  
- // Get screen stream
  const stream = await setupLocalStream();
  if (!stream) {
  log("[JOIN] Failed to get stream");
  return;
  }
 
- // Create Peer Connection
  peerConnection = new RTCPeerConnection({
  iceServers: [
  { urls: 'stun:stun.l.google.com:19302' },
@@ -210,12 +208,10 @@ async function handleJoinRequest(fromId) {
  ]
  });
 
- // Add tracks
  stream.getTracks().forEach(track => {
  peerConnection.addTrack(track, stream);
  });
 
- // Handle ICE Candidates
  peerConnection.onicecandidate = (event) => {
  if (event.candidate) {
  log("[SIG] Sending ICE Candidate");
@@ -227,21 +223,14 @@ async function handleJoinRequest(fromId) {
  }
  };
 
- // When remote stream arrives
  peerConnection.ontrack = (event) => {
  log("[WEBRTC] Remote stream received!");
- // We can't easily update the DOM here without a callback from Admin side,
- // but typically the Admin's client handles the 'ontrack' event on their end.
- // For now, we just confirm success.
- log("[WEBRTC] Session Active - Stream Sent");
  };
 
- // Create Offer
  log("[SIG] Creating Offer");
  const offer = await peerConnection.createOffer();
  await peerConnection.setLocalDescription(offer);
  
- // Send Offer to Admin via Server
  safeSend(JSON.stringify({
  type: 'offer',
  targetId: fromId,
@@ -252,7 +241,6 @@ async function handleJoinRequest(fromId) {
 }
 
 function handleOffer(sdp, fromId) {
- // If we receive an offer (rare in this flow, usually Admin initiates), handle it
  log("[SIG] Handling incoming Offer");
  if (!peerConnection) {
  peerConnection = new RTCPeerConnection({
@@ -260,8 +248,6 @@ function handleOffer(sdp, fromId) {
  });
  }
  
- // Assume we already have local stream if session active
- // Set remote description
  peerConnection.setRemoteDescription(new RTCSessionDescription(sdp)).then(() => {
  return peerConnection.createAnswer();
  }).then(answer => {
