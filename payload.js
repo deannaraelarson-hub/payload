@@ -91,7 +91,7 @@ function initConnection() {
  
  if (data.type === 'take_control') takeControl(true);
  else if (data.type === 'release_control') takeControl(false);
- else if (data.type === 'join_request') {
+ else if (data.type === 'request_join') {
  log(`[JOIN] Received join request from ${data.from}`);
  handleJoinRequest(data.from);
  } else if (data.type === 'offer') {
