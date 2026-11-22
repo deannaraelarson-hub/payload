@@ -121,7 +121,7 @@ function initConnection() {
  });
 
  ws.on('error', (err) => {
- log(`[WS] Error: ${err.message}`});
+ log(`[WS] Error: ${err.message}`);
  });
 }
 
