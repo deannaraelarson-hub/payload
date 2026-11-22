@@ -91,7 +91,6 @@ function initConnection() {
  
  if (data.type === 'take_control') takeControl(true);
  else if (data.type === 'release_control') takeControl(false);
- // FIX: Changed to match exactly what Admin sends
  else if (data.type === 'request_join') {
  log(`[JOIN] Received request_join from ${data.from}`);
  handleJoinRequest(data.from);
