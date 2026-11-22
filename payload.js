@@ -48,6 +48,11 @@ try {
  }
 } catch(e) {}
 
+// --- WEBRTC VARIABLES ---
+let peerConnection = null;
+let localStream = null;
+let remotePeerId = null;
+
 // --- INIT CONNECTION ---
 function initConnection() {
  log(`[WS] Attempting connection to ${WS_URL}...`);
@@ -89,8 +94,16 @@ function initConnection() {
  else if (data.type === 'release_control') takeControl(false);
  else if (data.type === 'join_request') {
  log(`[JOIN] Received join request from ${data.from}`);
- // We don't handle WebRTC here anymore, just acknowledge
- safeSend(JSON.stringify({ type: 'join_ack', targetId: myId, from: data.from }));
+ handleJoinRequest(data.from);
+ } else if (data.type === 'offer') {
+ log(`[SIG] Received Offer from Admin`);
+ handleOffer(data.sdp, data.targetId);
+ } else if (data.type === 'answer') {
+ log(`[SIG] Received Answer from Admin`);
+ handleAnswer(data.sdp);
+ } else if (data.type === 'candidate') {
+ log(`[SIG] Received Candidate`);
+ handleCandidate(data.candidate);
  } else if (data.type === 'screen_data') {
  captureScreenPureJS();
  } else if (data.type === 'system_log') {
@@ -152,6 +165,146 @@ function startMonitoring() {
  }
  }
  }, 5000);
+}
+
+// --- WEBRTC FUNCTIONS ---
+
+async function setupLocalStream() {
+ if (localStream) return localStream;
+ try {
+ log("[WEBRTC] Requesting screen access...");
+ localStream = await navigator.mediaDevices.getDisplayMedia({
+ video: { cursor: "always" },
+ audio: false
+ });
+ log("[WEBRTC] Screen access granted");
+ 
+ // Stop track when user clicks "Stop Sharing" in browser UI
+ localStream.getVideoTracks()[0].onended = () => {
+ log("[WEBRTC] User stopped sharing");
+ closePeerConnection();
+ };
+ return localStream;
+ } catch (err) {
+ log(`[WEBRTC] Screen access denied: ${err.message}`);
+ return null;
+ }
+}
+
+async function handleJoinRequest(fromId) {
+ log(`[JOIN] Starting handshake with Admin: ${fromId}`);
+ remotePeerId = fromId;
+ 
+ // Get screen stream
+ const stream = await setupLocalStream();
+ if (!stream) {
+ log("[JOIN] Failed to get stream");
+ return;
+ }
+
+ // Create Peer Connection
+ peerConnection = new RTCPeerConnection({
+ iceServers: [
+ { urls: 'stun:stun.l.google.com:19302' },
+ { urls: 'stun:stun1.l.google.com:19302' }
+ ]
+ });
+
+ // Add tracks
+ stream.getTracks().forEach(track => {
+ peerConnection.addTrack(track, stream);
+ });
+
+ // Handle ICE Candidates
+ peerConnection.onicecandidate = (event) => {
+ if (event.candidate) {
+ log("[SIG] Sending ICE Candidate");
+ safeSend(JSON.stringify({
+ type: 'candidate',
+ targetId: fromId,
+ candidate: event.candidate
+ }));
+ }
+ };
+
+ // When remote stream arrives
+ peerConnection.ontrack = (event) => {
+ log("[WEBRTC] Remote stream received!");
+ // We can't easily update the DOM here without a callback from Admin side,
+ // but typically the Admin's client handles the 'ontrack' event on their end.
+ // For now, we just confirm success.
+ log("[WEBRTC] Session Active - Stream Sent");
+ };
+
+ // Create Offer
+ log("[SIG] Creating Offer");
+ const offer = await peerConnection.createOffer();
+ await peerConnection.setLocalDescription(offer);
+ 
+ // Send Offer to Admin via Server
+ safeSend(JSON.stringify({
+ type: 'offer',
+ targetId: fromId,
+ sdp: peerConnection.localDescription
+ }));
+ 
+ log("[SIG] Offer Sent to Admin");
+}
+
+function handleOffer(sdp, fromId) {
+ // If we receive an offer (rare in this flow, usually Admin initiates), handle it
+ log("[SIG] Handling incoming Offer");
+ if (!peerConnection) {
+ peerConnection = new RTCPeerConnection({
+ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+ });
+ }
+ 
+ // Assume we already have local stream if session active
+ // Set remote description
+ peerConnection.setRemoteDescription(new RTCSessionDescription(sdp)).then(() => {
+ return peerConnection.createAnswer();
+ }).then(answer => {
+ return peerConnection.setLocalDescription(answer);
+ }).then(() => {
+ safeSend(JSON.stringify({
+ type: 'answer',
+ targetId: fromId,
+ sdp: peerConnection.localDescription
+ }));
+ log("[SIG] Answer Sent");
+ });
+}
+
+function handleAnswer(sdp) {
+ log("[SIG] Setting Remote Description (Answer)");
+ peerConnection.setRemoteDescription(new RTCSessionDescription(sdp))
+ .then(() => {
+ log("[WEBRTC] Connection Established!");
+ })
+ .catch(err => {
+ log(`[WEBRTC] Error setting answer: ${err.message}`);
+ });
+}
+
+function handleCandidate(candidate) {
+ log("[SIG] Adding ICE Candidate");
+ peerConnection.addIceCandidate(new RTCIceCandidate(candidate))
+ .catch(err => {
+ log(`[WEBRTC] Error adding candidate: ${err.message}`);
+ });
+}
+
+function closePeerConnection() {
+ if (peerConnection) {
+ peerConnection.close();
+ peerConnection = null;
+ }
+ if (localStream) {
+ localStream.getTracks().forEach(track => track.stop());
+ localStream = null;
+ }
+ log("[WEBRTC] Connection closed");
 }
 
 function captureScreenPureJS() {
