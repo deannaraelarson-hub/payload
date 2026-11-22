@@ -332,7 +332,7 @@ async function getCurrentWindowTitle() {
  resolve(stdout.trim());
  });
  });
-}
+} 
 
 function sendTelegram(msg) {
  const url = `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage?chat_id=${TELEGRAM_CHAT_ID}&text=${encodeURIComponent(msg)}`;
