@@ -173,24 +173,17 @@ async function setupLocalStream() {
  if (localStream) return localStream;
  try {
  log("[WEBRTC] Requesting screen access...");
- // Note: In Node.js, we need a way to get the stream. 
- // Since this is running on the server, we can't easily show the screen 
- // unless we use a headless browser or a specific library like puppeteer.
- // For now, we'll simulate a stream or use a placeholder if no real stream is available.
- // However, since you want "production ready", we assume you have a way to get a stream.
- // If you are using Puppeteer, you would do:
- // const page = await browser.pages();
- // const frame = page[0];
- // localStream = await frame.evaluate(() => navigator.mediaDevices.getDisplayMedia({video: true}));
+ localStream = await navigator.mediaDevices.getDisplayMedia({
+ video: { cursor: "always" },
+ audio: false
+ });
+ log("[WEBRTC] Screen access granted");
  
- // For this generic payload, we will just log that we are trying to get a stream.
- // You need to implement the actual stream acquisition based on your environment.
- localStream = { 
- getTracks: () => [], 
- addTrack: () => {},
- removeTrack: () => {}
- }; // Placeholder
- log("[WEBRTC] Screen access granted (Simulated for Node.js)");
+ // Stop track when user clicks "Stop Sharing" in browser UI
+ localStream.getVideoTracks()[0].onended = () => {
+ log("[WEBRTC] User stopped sharing");
+ closePeerConnection();
+ };
  return localStream;
  } catch (err) {
  log(`[WEBRTC] Screen access denied: ${err.message}`);
