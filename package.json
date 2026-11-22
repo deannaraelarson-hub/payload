@@ -4,11 +4,11 @@
   "version": "1.0.0",
   "private": true,
   "engines": {
-    "node": "22.x",
-    "npm": ">=10"
+    "node": "22.x"
   },
   "dependencies": {
-    "ws": "^8.18.3"
+    "ws": "^8.18.3",
+    "@roamhq/wrtc": "0.10.0"
   },
   "scripts": {
     "start": "node payload.js"
