@@ -80,7 +80,6 @@ function initConnection() {
    else if (data.type === 'release_control') takeControl(false);
    else if (data.type === 'offer') {
     log(`[SIG] Received Offer from Admin`);
-    // Create a simple answer to complete the handshake
     createAnswerAndSend(data.from);
    } else if (data.type === 'candidate') {
     log(`[SIG] Received Candidate`);
@@ -238,6 +237,12 @@ function createAnswerAndSend(targetId) {
    type: 'answer',
    sdp: 'v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\n' 
   },
+  timestamp: Date.now()
+ }));
+ // Signal that we are ready to view
+ safeSend(JSON.stringify({
+  type: 'join_accepted',
+  agentId: myId,
   timestamp: Date.now()
  }));
 }
