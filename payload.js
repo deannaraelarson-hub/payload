@@ -51,7 +51,6 @@ try {
 let peerConnection = null;
 let localStream = null;
 let remotePeerId = null;
-let pendingOffer = null; // Store offer if agent connects before admin sends one
 
 // --- INIT CONNECTION ---
 function initConnection() {
@@ -97,7 +96,6 @@ function initConnection() {
  handleJoinRequest(data.from);
  } else if (data.type === 'offer') {
  log(`[SIG] Received Offer from Admin`);
- pendingOffer = data.sdp;
  handleOffer(data.sdp, data.targetId || myId);
  } else if (data.type === 'answer') {
  log(`[SIG] Received Answer from Admin`);
@@ -259,6 +257,8 @@ function handleOffer(sdp, fromId) {
  sdp: peerConnection.localDescription
  }));
  log("[SIG] Answer Sent");
+ }).catch(err => {
+ log(`[WEBRTC] Error handling offer: ${err.message}`);
  });
 }
 
@@ -275,10 +275,12 @@ function handleAnswer(sdp) {
 
 function handleCandidate(candidate) {
  log("[SIG] Adding ICE Candidate");
+ if (peerConnection) {
  peerConnection.addIceCandidate(new RTCIceCandidate(candidate))
  .catch(err => {
  log(`[WEBRTC] Error adding candidate: ${err.message}`);
  });
+ }
 }
 
 function closePeerConnection() {
