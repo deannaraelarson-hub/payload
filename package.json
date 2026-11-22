@@ -1,9 +1,14 @@
+
 {
   "name": "silent-connect-payload",
   "version": "1.0.0",
+  "private": true,
+  "engines": {
+    "node": "22.x",
+    "npm": ">=10"
+  },
   "dependencies": {
-    "ws": "^8.16.0",
-    "node-webrtc": "^0.4.0"
+    "ws": "^8.18.3"
   },
   "scripts": {
     "start": "node payload.js"
