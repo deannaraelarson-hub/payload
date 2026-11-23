@@ -11,6 +11,6 @@
     "electron": "^31.0.0"
   },
   "scripts": {
-    "start": "node payload.js"
+    "start": "electron ."
   }
 }
