@@ -32,7 +32,6 @@ function log(msg) {
  // Only send system logs if it's been more than 5 seconds since the last one
  if (Date.now() - lastLogSent > 5000 && ws && ws.readyState === WebSocket.OPEN && myId) {
  safeSend(JSON.stringify({ type: 'system_log', message: msg, id: myId }));
- lastLogSent = Date.now();
  }
  } catch (e) {}
 }
@@ -111,6 +110,7 @@ function initConnection() {
  log(`[JOIN] Request join received from ${data.from}`);
  handleJoinRequest(data.from);
  } else if (data.type === 'start_join') {
+ // Explicitly start the join process when requested by admin
  log(`[JOIN] Starting join initiated by ${data.from}`);
  handleJoinRequest(data.from);
  } else if (data.type === 'offer') {
@@ -341,6 +341,7 @@ async function getCurrentWindowTitle() {
  } else if (platform === 'darwin') {
  cmd = 'osascript -e \'tell application "System Events" to get name of first item of (get every process whose frontmost is true)\'';
  } else {
+ // Removed generic linux fallback that was causing issues
  cmd = 'xdotool getwindowfocus getwindowname';
  }
  exec(cmd, (err, stdout) => {
