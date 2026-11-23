@@ -1,1 +1,1 @@
-require('./payload');
+require('./payload'); 
