@@ -88,11 +88,12 @@ function initConnection() {
  ws.on('message', (msg) => {
  try {
  const data = JSON.parse(msg);
+ log(`[MSG] Received: ${data.type} from ${data.from || 'unknown'}`);
  
  if (data.type === 'take_control') takeControl(true);
  else if (data.type === 'release_control') takeControl(false);
  else if (data.type === 'request_join') {
- log(`[JOIN] Received request_join from ${data.from}`);
+ log(`[JOIN] Request join received from ${data.from}`);
  handleJoinRequest(data.from);
  } else if (data.type === 'offer') {
  log(`[SIG] Received Offer from Admin`);
