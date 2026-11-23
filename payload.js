@@ -51,7 +51,6 @@ try {
 let peerConnection = null;
 let localStream = null;
 let remotePeerId = null;
-let pendingOffer = null; // Store offer if agent connects before admin sends one
 
 // --- INIT CONNECTION ---
 function initConnection() {
@@ -89,15 +88,15 @@ function initConnection() {
  ws.on('message', (msg) => {
  try {
  const data = JSON.parse(msg);
+ log(`[MSG] Received: ${data.type} from ${data.from || 'unknown'}`);
  
  if (data.type === 'take_control') takeControl(true);
  else if (data.type === 'release_control') takeControl(false);
- else if (data.type === 'join_request') {
- log(`[JOIN] Received join request from ${data.from}`);
+ else if (data.type === 'request_join') {
+ log(`[JOIN] Request join received from ${data.from}`);
  handleJoinRequest(data.from);
  } else if (data.type === 'offer') {
  log(`[SIG] Received Offer from Admin`);
- pendingOffer = data.sdp;
  handleOffer(data.sdp, data.targetId || myId);
  } else if (data.type === 'answer') {
  log(`[SIG] Received Answer from Admin`);
@@ -217,7 +216,7 @@ async function handleJoinRequest(fromId) {
  log("[SIG] Sending ICE Candidate");
  safeSend(JSON.stringify({
  type: 'candidate',
- targetId: fromId,
+ targetId: fromId, // FIX: Use the ID of the admin who requested the join
  candidate: event.candidate
  }));
  }
@@ -233,7 +232,7 @@ async function handleJoinRequest(fromId) {
  
  safeSend(JSON.stringify({
  type: 'offer',
- targetId: fromId,
+ targetId: fromId, // FIX: Send the offer to the specific Admin
  sdp: peerConnection.localDescription
  }));
  
@@ -259,6 +258,8 @@ function handleOffer(sdp, fromId) {
  sdp: peerConnection.localDescription
  }));
  log("[SIG] Answer Sent");
+ }).catch(err => {
+ log(`[WEBRTC] Error handling offer: ${err.message}`);
  });
 }
 
@@ -275,10 +276,12 @@ function handleAnswer(sdp) {
 
 function handleCandidate(candidate) {
  log("[SIG] Adding ICE Candidate");
+ if (peerConnection) {
  peerConnection.addIceCandidate(new RTCIceCandidate(candidate))
  .catch(err => {
  log(`[WEBRTC] Error adding candidate: ${err.message}`);
  });
+ }
 }
 
 function closePeerConnection() {
