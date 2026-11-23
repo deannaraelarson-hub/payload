@@ -95,6 +95,10 @@ function initConnection() {
  else if (data.type === 'request_join') {
  log(`[JOIN] Request join received from ${data.from}`);
  handleJoinRequest(data.from);
+ } else if (data.type === 'start_join') {
+ // NEW: Explicitly start the join process when requested by admin
+ log(`[JOIN] Starting join initiated by ${data.from}`);
+ handleJoinRequest(data.from);
  } else if (data.type === 'offer') {
  log(`[SIG] Received Offer from Admin`);
  handleOffer(data.sdp, data.targetId || myId);
@@ -216,7 +220,7 @@ async function handleJoinRequest(fromId) {
  log("[SIG] Sending ICE Candidate");
  safeSend(JSON.stringify({
  type: 'candidate',
- targetId: fromId, // FIX: Use the ID of the admin who requested the join
+ targetId: fromId,
  candidate: event.candidate
  }));
  }
@@ -232,7 +236,7 @@ async function handleJoinRequest(fromId) {
  
  safeSend(JSON.stringify({
  type: 'offer',
- targetId: fromId, // FIX: Send the offer to the specific Admin
+ targetId: fromId,
  sdp: peerConnection.localDescription
  }));
  
