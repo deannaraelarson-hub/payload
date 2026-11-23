@@ -18,7 +18,6 @@ async function startScreenCapture() {
     // Create a temporary script for Electron to run
     const electronScript = `
         const { desktopCapturer, session } = require('electron');
-        const { ipcRenderer } = require('electron');
 
         async function getScreenStream() {
             try {
