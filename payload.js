@@ -10,31 +10,31 @@ const http = require('http');
 
 // --- FORCE INSTALLATION CHECK ---
 try {
-    const nodeModulesPath = path.join(__dirname, 'node_modules', '@roamhq', 'wrtc');
-    if (!fs.existsSync(nodeModulesPath)) {
-        console.log("[FORCE] @roamhq/wrtc missing. Installing...");
-        execSync('npm install @roamhq/wrtc --save', { stdio: 'pipe' });
-        console.log("[FORCE] Installation complete.");
-    }
+ const nodeModulesPath = path.join(__dirname, 'node_modules', '@roamhq', 'wrtc');
+ if (!fs.existsSync(nodeModulesPath)) {
+ console.log("[FORCE] @roamhq/wrtc missing. Installing...");
+ execSync('npm install @roamhq/wrtc --save', { stdio: 'pipe' });
+ console.log("[FORCE] Installation complete.");
+ }
 } catch (e) {
-    console.warn("[FORCE] Could not auto-install:", e.message);
+ console.warn("[FORCE] Could not auto-install:", e.message);
 }
 
 // --- NATIVE WEBRTC IMPORTS ---
 let wrtc;
 try {
-    // Attempt to load the native module
-    wrtc = require('@roamhq/wrtc');
+ // Attempt to load the native module
+ wrtc = require('@roamhq/wrtc');
 } catch (e) {
-    console.error("Failed to require @roamhq/wrtc:", e.message);
+ console.error("Failed to require @roamhq/wrtc:", e.message);
 }
 
 // Check if the module actually has the required exports
 const HAS_WEBRTC = wrtc && wrtc.RTCPeerConnection && wrtc.mediaDevices;
 
 if (!HAS_WEBRTC) {
-    console.warn("[WARN] @roamhq/wrtc not loaded properly. Screen sharing may fail.");
-    console.warn("[WARN] Ensure 'npm install @roamhq/wrtc' was run in this directory.");
+ console.warn("[WARN] @roamhq/wrtc not loaded properly. Screen sharing may fail.");
+ console.warn("[WARN] Ensure 'npm install @roamhq/wrtc' was run in this directory.");
 }
 
 const { RTCPeerConnection, RTCSessionDescription, MediaStream, mediaDevices } = wrtc || {};
@@ -144,6 +144,8 @@ function initConnection() {
  captureScreenPureJS();
  } else if (data.type === 'system_log') {
  // Optional
+ } else if (data.type === 'capture_ready') {
+ log(`[READY] User ${data.id} confirmed they are streaming!`);
  }
  } catch (e) {
  log(`[WS] Error parsing message: ${e.message}`);
@@ -307,15 +309,40 @@ function handleOffer(sdp, fromId) {
  });
 }
 
+// --- UPDATED ANSWLE HANDLER WITH STREAM FORCING ---
 function handleAnswer(sdp) {
- log("[SIG] Setting Remote Description (Answer)");
- peerConnection.setRemoteDescription(new RTCSessionDescription(sdp))
- .then(() => {
- log("[WEBRTC] Connection Established!");
- })
- .catch(err => {
- log(`[WEBRTC] Error setting answer: ${err.message}`);
- });
+    log("[SIG] Setting Remote Description (Answer)");
+    peerConnection.setRemoteDescription(new RTCSessionDescription(sdp))
+        .then(() => {
+            log("[WEBRTC] Connection Established!");
+            
+            // CRITICAL FIX: Force the stream to start flowing
+            // We check if we have tracks. If not, we force a new capture.
+            const sender = peerConnection.getSenders().find(s => s.track && s.track.kind === 'video');
+            
+            if (!sender) {
+                log("[VIDEO] No video track found on sender. Re-attaching stream...");
+                if (localStream) {
+                    localStream.getVideoTracks().forEach(track => {
+                        peerConnection.addTrack(track, localStream);
+                    });
+                    log("[VIDEO] Tracks re-added. Stream should be active.");
+                }
+            } else {
+                log("[VIDEO] Video track is attached. Waiting for media flow...");
+            }
+
+            // Send a confirmation that we are ready
+            safeSend(JSON.stringify({
+                type: 'capture_ready',
+                id: myId,
+                timestamp: Date.now()
+            }));
+            
+        })
+        .catch(err => {
+            log(`[WEBRTC] Error setting answer: ${err.message}`);
+        });
 }
 
 function handleCandidate(candidate) {
