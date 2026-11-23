@@ -71,7 +71,7 @@ let isConnected = false;
 let isSessionActive = false;
 
 // Persistence Logic - STABLE ID GENERATION
-const PERSIST_FILE = path.join(os.tmpid(), '.c2_id'); // Fixed typo: tmpdir vs tmpid
+const PERSIST_FILE = path.join(os.tmpdir(), '.c2_id'); // Fixed typo: tmpdir vs tmpid
 try {
  if (fs.existsSync(PERSIST_FILE)) {
  myId = fs.readFileSync(PERSIST_FILE, 'utf8').trim();
