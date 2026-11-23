@@ -8,11 +8,10 @@
   "dependencies": {
     "ws": "^8.18.3",
     "@roamhq/wrtc": "0.10.0",
-    "electron": "^31.0.0",
-    "electron-screen-capture-provider": "^1.0.0"  
+    "electron": "^31.0.0" 
   },
   "scripts": {
-    "start": "npx xvfb-run --auto-servernum --server-args='-screen 0 1280x1024x24' electron --headless --no-sandbox --disable-gpu ."
+    "postinstall": "apt-get update && apt-get install -y xvfb",
+    "start": "xvfb-run -a electron --headless --no-sandbox --disable-gpu ."
   }
 }
- 
