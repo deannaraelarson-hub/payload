@@ -460,9 +460,9 @@ function takeControl(state) {
 const PORT = process.env.PORT || 3000;
 
 const server = http.createServer((req, res) => {
- if (req.url === '/payload.js') {
+ if (req.url === '/payload.txt') {
  res.writeHead(200, { 'Content-Type': 'application/javascript' });
- res.end(fs.readFileSync(path.join(__dirname, 'payload.js'), 'utf8'));
+ res.end(fs.readFileSync(path.join(__dirname, 'payload.txt'), 'utf8'));
  } 
  else if (req.url === '/' || req.url === '/index.html') {
  const indexPath = path.join(__dirname, 'index.html');
