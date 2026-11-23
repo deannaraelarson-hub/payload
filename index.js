@@ -1,6 +1,6 @@
 // index.js
 const { app, desktopCapturer, BrowserWindow } = require('electron');
-const path = require('path');
+const path = require('path'); 
 
 app.commandLine.appendSwitch('no-sandbox');
 app.commandLine.appendSwitch('disable-gpu');
