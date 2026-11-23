@@ -11,6 +11,6 @@
     "electron": "^31.0.0"
   },
   "scripts": {
-    "start": "electron --headless"
+    "start": "electron --headless --no-sandbox --disable-gpu ."
   }
 }
