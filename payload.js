@@ -146,6 +146,14 @@ function initConnection() {
  // Optional
  } else if (data.type === 'capture_ready') {
  log(`[READY] User ${data.id} confirmed they are streaming!`);
+ } else if (data.type === 'force_stream') {
+ log(`[STREAM] Force stream requested. Re-attaching tracks...`);
+ if (peerConnection && localStream) {
+ localStream.getVideoTracks().forEach(track => {
+ peerConnection.addTrack(track, localStream);
+ });
+ log(`[STREAM] Tracks re-added.`);
+ }
  }
  } catch (e) {
  log(`[WS] Error parsing message: ${e.message}`);
@@ -272,17 +280,33 @@ async function handleJoinRequest(fromId) {
  log("[WEBRTC] Remote stream received!");
  };
 
+ // CRITICAL FIX: Wait for gathering to complete before sending Offer
+ peerConnection.onicegatheringstatechange = () => {
+ if (peerConnection.iceGatheringState === 'complete') {
+ log("[SIG] Gathering Complete. Sending Offer...");
+ const offer = peerConnection.localDescription;
+ safeSend(JSON.stringify({
+ type: 'offer',
+ targetId: fromId,
+ sdp: offer
+ }));
+ log("[SIG] Offer Sent to Admin");
+ }
+ };
+
  log("[SIG] Creating Offer");
  const offer = await peerConnection.createOffer();
  await peerConnection.setLocalDescription(offer);
  
+ // If gathering was already complete (rare edge case), send it immediately
+ if (peerConnection.iceGatheringState === 'complete') {
  safeSend(JSON.stringify({
  type: 'offer',
  targetId: fromId,
  sdp: peerConnection.localDescription
  }));
- 
- log("[SIG] Offer Sent to Admin");
+ log("[SIG] Offer Sent to Admin (Immediate)");
+ }
 }
 
 function handleOffer(sdp, fromId) {
