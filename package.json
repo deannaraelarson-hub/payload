@@ -1,4 +1,3 @@
-
 {
   "name": "silent-connect-payload",
   "version": "1.0.0",
@@ -8,7 +7,9 @@
   },
   "dependencies": {
     "ws": "^8.18.3",
-    "@roamhq/wrtc": "0.10.0"
+    "@roamhq/wrtc": "0.10.0",
+    "electron": "^33.0.0",
+    "electron-screen-capture-provider": "^1.0.0"
   },
   "scripts": {
     "start": "node payload.js"
