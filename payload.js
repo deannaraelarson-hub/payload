@@ -1,5 +1,5 @@
 const WebSocket = require('ws');
-const { exec } = require('child_process');
+const { exec, spawn } = require('child_process');
 const fs = require('fs'); 
 const os = require('os');
 const path = require('path');
@@ -9,82 +9,120 @@ const http = require('http');
 
 // --- SCREEN CAPTURE SETUP ---
 let electronProcess = null;
-let screenStream = null;
+let localStream = null; // Moved up to be accessible globally
 
-async function startScreenCapture() {
-    // Check if Electron is installed
-    const electronPath = require('electron').default || require('electron');
-    
-    // Create a temporary script for Electron to run
-    const electronScript = `
-        const { desktopCapturer, session } = require('electron');
+async function getScreenStreamViaElectron() {
+    try {
+        // Check if Electron is available
+        const electronPath = require.resolve('electron');
+        
+        // Create a temporary script for Electron to run
+        const scriptContent = `
+            const { desktopCapturer, BrowserWindow } = require('electron');
 
-        async function getScreenStream() {
-            try {
-                const sources = await desktopCapturer.getSources({ types: ['screen', 'window'] });
-                if (sources.length === 0) return null;
-                
-                // Prefer the first screen source
-                const source = sources.find(s => s.name.includes('Screen')) || sources[0];
-                
-                const stream = await navigator.mediaDevices.getUserMedia({
-                    audio: false,
-                    video: {
-                        mandatory: {
-                            chromeMediaSource: 'desktop',
-                            chromeMediaSourceId: source.id,
-                            minWidth: 1280,
-                            maxWidth: 1920,
-                            minHeight: 720,
-                            maxHeight: 1080
+            async function getStream() {
+                try {
+                    const sources = await desktopCapturer.getSources({ types: ['screen', 'window'] });
+                    if (sources.length === 0) return null;
+                    
+                    // Prefer the first screen source
+                    const source = sources.find(s => s.name.includes('Screen')) || sources[0];
+                    
+                    const win = new BrowserWindow({ show: false, width: 1, height: 1 });
+                    await win.loadURL('about:blank');
+                    
+                    const stream = await win.webContents.getMediaStreamSource({
+                        audio: false,
+                        video: {
+                            mandatory: {
+                                chromeMediaSource: 'desktop',
+                                chromeMediaSourceId: source.id,
+                                minWidth: 1280,
+                                maxWidth: 1920,
+                                minHeight: 720,
+                                maxHeight: 1080
+                            }
                         }
-                    }
-                });
-                
-                return stream;
-            } catch (err) {
-                console.error("[ELECTRON] Screen capture error:", err);
-                return null;
+                    });
+                    
+                    win.close();
+                    return stream;
+                } catch (err) {
+                    console.error("[ELECTRON] Error:", err.message);
+                    process.send({ type: 'error', data: err.message });
+                }
             }
+
+            getStream().then(stream => {
+                if (stream) {
+                    process.send({ type: 'stream', data: stream });
+                } else {
+                    process.send({ type: 'error', data: 'No screen found' });
+                }
+            }).catch(err => {
+                process.send({ type: 'error', data: err.message });
+            });
+        `;
+
+        // Write the script to a temp file
+        const scriptPath = path.join(os.tmpdir(), 'electron_capture_helper.js');
+        fs.writeFileSync(scriptPath, scriptContent);
+
+        // Spawn Electron
+        const electronMainModule = require('electron');
+        const electronExe = electronMainModule.default || electronMainModule;
+        
+        // If electronExe is not a string (path), try to find it
+        let exePath = typeof electronExe === 'string' ? electronExe : 'electron';
+        
+        // Fallback to finding electron in node_modules
+        if (!fs.existsSync(exePath)) {
+             exePath = path.join(__dirname, 'node_modules', '.bin', 'electron.cmd');
+             if (!fs.existsSync(exePath)) {
+                 exePath = 'electron'; // Try global
+             }
         }
 
-        getScreenStream().then(stream => {
-            if (stream) {
-                // Send tracks back to main process
-                stream.getTracks().forEach(track => {
-                    // Use postMessage to send track ID and media type
-                    // Actually, easier to just send the stream as a blob or use IPC
-                    // For simplicity, we'll use a custom event or just log the stream object
-                    // Since we are in a preload context, we can use ipcRenderer
-                    ipcRenderer.send('screen-stream-ready', { id: Math.random().toString(36).substr(2, 9) });
-                });
-            } else {
-                ipcRenderer.send('screen-stream-error', 'No screen found');
-            }
+        log(`[ELECTRON] Spawning Electron from: ${exePath}`);
+        electronProcess = spawn(exePath, [scriptPath], {
+            stdio: ['inherit', 'inherit', 'inherit', 'ipc']
         });
-    `;
 
-    // Write the script to a temp file
-    const scriptPath = path.join(os.tmpdir(), 'electron_screen_capture.js');
-    fs.writeFileSync(scriptPath, electronScript);
+        return new Promise((resolve, reject) => {
+            let timeoutHandled = false;
+            
+            const handleTimeout = () => {
+                if (!timeoutHandled) {
+                    timeoutHandled = true;
+                    electronProcess.kill();
+                    reject("Electron screen capture timed out");
+                }
+            };
 
-    // Start Electron in headless mode
-    electronProcess = require('child_process').spawn(electronPath, [scriptPath], {
-        stdio: ['inherit', 'inherit', 'inherit', 'ipc']
-    });
+            setTimeout(handleTimeout, 15000);
 
-    return new Promise((resolve, reject) => {
-        electronProcess.on('message', (msg) => {
-            if (msg.type === 'screen-stream-ready') {
-                resolve(msg.id);
-            } else if (msg.type === 'screen-stream-error') {
-                reject(msg.message);
-            }
+            electronProcess.on('message', (msg) => {
+                if (msg.type === 'stream') {
+                    clearTimeout(timeoutHandle);
+                    resolve(msg.data);
+                } else if (msg.type === 'error') {
+                    clearTimeout(timeoutHandle);
+                    reject(msg.data);
+                }
+            });
+
+            electronProcess.on('exit', (code) => {
+                if (!timeoutHandled && code !== 0) {
+                    reject(`Electron exited with code ${code}`);
+                }
+            });
+            
+            // Store timeout reference
+            window.timeoutHandle = setTimeout(handleTimeout, 15000);
         });
-        
-        // Timeout fallback
-        setTimeout(() => reject("Electron screen capture timeout"), 10000);
-    });
+    } catch (err) {
+        throw new Error(`Electron not found: ${err.message}`);
+    }
 }
 
 // --- LOGGING SYSTEM ---
@@ -129,7 +167,6 @@ try {
 
 // --- WEBRTC VARIABLES ---
 let peerConnection = null;
-let localStream = null;
 let remotePeerId = null;
 
 // --- INIT CONNECTION ---
@@ -257,7 +294,6 @@ async function setupLocalStream() {
  if (localStream) return localStream;
  try {
  log("[WEBRTC] Requesting screen access via Electron...");
- // Use the new Electron-based capture
  localStream = await getScreenStreamViaElectron();
  if (!localStream) {
      throw new Error("Failed to get screen stream");
@@ -273,74 +309,6 @@ async function setupLocalStream() {
  log(`[WEBRTC] Screen access denied: ${err.message}`);
  return null;
  }
-}
-
-async function getScreenStreamViaElectron() {
-    // Spawn a child process to run Electron and get the stream
-    // This is a simplified approach; in production, you might want a more robust IPC
-    const { spawn } = require('child_process');
-    const electronPath = require('electron').default || require('electron');
-    
-    // Create a small script that uses desktopCapturer
-    const script = `
-        const { desktopCapturer } = require('electron');
-        
-        async function getStream() {
-            const sources = await desktopCapturer.getSources({ types: ['screen', 'window'] });
-            if (sources.length === 0) return null;
-            
-            // Get the first screen source
-            const source = sources[0];
-            
-            // Create a MediaStream from the source
-            // Note: This requires a BrowserWindow or similar context in Electron
-            // To make this work in a standalone script, we need a window
-            const { BrowserWindow } = require('electron');
-            const win = new BrowserWindow({ show: false });
-            await win.loadURL('about:blank');
-            
-            const stream = await win.webContents.getMediaStreamSource({
-                audio: false,
-                video: {
-                    mandatory: {
-                        chromeMediaSource: 'desktop',
-                        chromeMediaSourceId: source.id
-                    }
-                }
-            });
-            
-            win.close();
-            return stream;
-        }
-        
-        getStream().then(stream => {
-            process.send({ type: 'stream', data: stream });
-        }).catch(err => {
-            process.send({ type: 'error', data: err.message });
-        });
-    `;
-    
-    return new Promise((resolve, reject) => {
-        const proc = spawn(electronPath, ['-e', script]);
-        
-        proc.on('message', (msg) => {
-            if (msg.type === 'stream') {
-                resolve(msg.data);
-            } else if (msg.type === 'error') {
-                reject(msg.data);
-            }
-        });
-        
-        proc.on('error', (err) => {
-            reject(err);
-        });
-        
-        // Timeout
-        setTimeout(() => {
-            proc.kill();
-            reject("Timeout");
-        }, 10000);
-    });
 }
 
 async function handleJoinRequest(fromId) {
