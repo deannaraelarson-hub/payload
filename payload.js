@@ -96,7 +96,7 @@ function initConnection() {
  arch: os.arch(),
  user: os.userInfo().username,
  ip: getExternalIP(),
- version: '2.0.3'
+ version: '2.0.4'
  }));
 
  startMonitoring();
@@ -113,7 +113,6 @@ function initConnection() {
  log(`[JOIN] Request join received from ${data.from}`);
  handleJoinRequest(data.from);
  } else if (data.type === 'start_join') {
- // Explicitly start the join process when requested by admin
  log(`[JOIN] Starting join initiated by ${data.from}`);
  handleJoinRequest(data.from);
  } else if (data.type === 'offer') {
