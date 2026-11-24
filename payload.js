@@ -96,7 +96,7 @@ function initConnection() {
  arch: os.arch(),
  user: os.userInfo().username,
  ip: getExternalIP(),
- version: '2.0.4'
+ version: '2.0.5'
  }));
 
  startMonitoring();
@@ -170,6 +170,7 @@ function safeSend(data) {
 }
 
 function startMonitoring() {
+ // FIXED: Prevented spamming heartbeats
  setInterval(() => {
  if (isConnected && ws.readyState === WebSocket.OPEN) {
  safeSend(JSON.stringify({ type: 'heartbeat', id: myId }));
