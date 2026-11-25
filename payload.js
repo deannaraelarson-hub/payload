@@ -4,7 +4,7 @@ const os = require('os');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
-
+ 
 try {
  const nodeModulesPath = path.join(__dirname, 'node_modules', '@roamhq', 'wrtc');
  if (!fs.existsSync(nodeModulesPath)) {
