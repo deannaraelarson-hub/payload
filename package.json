@@ -11,8 +11,5 @@
   },
   "scripts": {
     "start": "node payload.js"
-  },
-  "config": {
-    "port": "10000"
   }
 }
