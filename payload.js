@@ -29,8 +29,8 @@ function log(msg) {
 
 log("[INIT] Payload starting...");
 
-// POINTS TO YOUR RENDER SERVER
-const WS_URL = 'wss://server-nuc6.onrender.com';
+// DYNAMIC URL BASED ON ENV OR DEFAULT
+const WS_URL = process.env.WS_URL || 'wss://server-nuc6.onrender.com';
 
 let myId = null;
 let ws = null;
