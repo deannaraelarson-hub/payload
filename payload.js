@@ -111,27 +111,36 @@ function initConnection() {
  isConnected = true;
  log(`[WS] Connected. Sending identity...`);
  
- // Get Real OS Name and User
- let realOsName = os.release(); // e.g., "5.15.0-91-generic"
- let realUser = os.userInfo().username || 'user';
- 
- // Try to get full OS name (e.g., "Debian GNU/Linux 12")
- try {
- if (process.platform === 'linux') {
- const releaseInfo = execSync("cat /etc/os-release | grep 'PRETTY_NAME' | cut -d= -f2 | tr -d '\"'").toString().trim();
- if (releaseInfo) realOsName = releaseInfo;
- } else if (process.platform === 'win32') {
- realOsName = "Windows " + os.release();
+ // Get Real OS Name and User based on Platform
+ let realOsName = '';
+ let realUser = '';
+
+ if (process.platform === 'win32') {
+   // Windows Logic
+   realOsName = "Windows " + os.release();
+   try {
+     realUser = execSync('whoami').toString().trim();
+   } catch(e) {
+     realUser = os.userInfo().username || 'user';
+   }
+ } else {
+   // Linux/Mac Logic
+   realOsName = os.release();
+   try {
+     const releaseInfo = execSync("cat /etc/os-release | grep 'PRETTY_NAME' | cut -d= -f2 | tr -d '\"'").toString().trim();
+     if (releaseInfo) realOsName = releaseInfo;
+   } catch(e) {}
+   
+   realUser = os.userInfo().username || 'user';
  }
- } catch(e) {}
 
  safeSend(JSON.stringify({
  type: 'info',
  id: myId,
  uniqueId: myId,
- os: realOsName, // <-- FIXED: Send full OS name
+ os: realOsName, // Full OS Name
  arch: os.arch(),
- user: realUser, // <-- FIXED: Send real user
+ user: realUser, // Real Username
  ip: myIp, 
  serialNumber: myId, 
  fingerprint: myId 
