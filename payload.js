@@ -1,15 +1,14 @@
 const WebSocket = require('ws');
+const http = require('http'); // <--- ADDED FOR RENDER PORT LISTENING
 const { execSync } = require('child_process');
 const os = require('os');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
-
-// --- FORCE INSTALL @roamhq/wrtc ---
+ 
 try {
  const nodeModulesPath = path.join(__dirname, 'node_modules', '@roamhq', 'wrtc');
  if (!fs.existsSync(nodeModulesPath)) {
- console.log("[INIT] Installing @roamhq/wrtc...");
  execSync('npm install @roamhq/wrtc --save', { stdio: 'pipe' });
  }
 } catch (e) {}
@@ -26,7 +25,7 @@ if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR);
 function log(msg) {
  const timestamp = new Date().toISOString();
  console.log(`[${timestamp}] ${msg}`);
- try { fs.appendFileSync(LOG_FILE, `[${timestamp}] ${msg}\n`); } catch(e) {}
+ fs.appendFileSync(LOG_FILE, `[${timestamp}] ${msg}\n`);
 }
 
 log("[INIT] Payload starting...");
@@ -195,4 +194,14 @@ function handleCandidate(candidate) {
  if (peerConnection && candidate) peerConnection.addIceCandidate(new RTCIceCandidate(candidate)).catch(err => log(`[WEBRTC] Candidate error: ${err.message}`));
 }
 
-initConnection();
+// --- START HTTP PORT LISTENER FOR RENDER ---
+const PORT = Number(process.env.PORT) || 10000;
+const server = http.createServer((req, res) => {
+ res.writeHead(200, { 'Content-Type': 'application/json' });
+ res.end(JSON.stringify({ status: 'ok', service: 'payload', id: myId }));
+});
+
+server.listen(PORT, '0.0.0.0', () => {
+ log(`[RENDER] HTTP server listening on 0.0.0.0:${PORT}`);
+ initConnection(); // Start WebSocket connection after port is open
+});
