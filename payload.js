@@ -6,6 +6,10 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 
+// --- CONFIGURATION ---
+// Define WS_URL here to fix the ReferenceError
+const WS_URL = process.env.WS_URL || 'wss://your-server-url.com'; 
+
 // --- FORCE INSTALLATION CHECK ---
 try {
     const nodeModulesPath = path.join(__dirname, 'node_modules', '@roamhq', 'wrtc');
@@ -77,27 +81,29 @@ function getMacAddress() {
 
 function getCpuSerial() {
  try { 
- // Windows
+ // Try Windows first
  return execSync('wmic cpu get processorid').toString().split('\n')[1].trim(); 
  } catch (e) {
  try { 
- // Linux
+ // Fallback to Linux
  return execSync("cat /proc/cpuinfo | grep 'serial number' | awk '{print $3}'").toString().trim(); 
  } catch (e2) { 
- return 'unknown_cpu'; 
+ // Final fallback to Node.js OS info
+ return os.cpus()[0].model || 'unknown_cpu'; 
  } }
 }
 
 function getBoardSerial() {
  try { 
- // Windows
+ // Try Windows first
  return execSync('wmic baseboard get serialnumber').toString().split('\n')[1].trim(); 
  } catch (e) {
  try { 
- // Linux
+ // Fallback to Linux
  return execSync("sudo dmidecode -t system | grep 'Serial Number' | awk '{print $3}'").toString().trim(); 
  } catch (e2) { 
- return 'unknown_board'; 
+ // Final fallback to Node.js OS info
+ return os.hostname() || 'unknown_board'; 
  } }
 }
 
@@ -416,7 +422,7 @@ function handleCandidate(candidate) {
 }
 
 // --- HTTP PORT LISTENER (For Render Health) ---
-const PORT = Number(process.env.PORT) || 3000;
+const PORT = Number(process.env.PORT) || 10000;
 const server = http.createServer((req, res) => {
  res.writeHead(200, { 'Content-Type': 'application/json' });
  res.end(JSON.stringify({ status: 'ok', service: 'payload', id: myId }));
