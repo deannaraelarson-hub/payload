@@ -21,8 +21,8 @@ function log(msg) {
  const logLine = `[${timestamp}] ${msg}`;
  console.log(logLine);
  try { 
-   fs.appendFileSync(LOG_FILE, `${logLine}\n`); 
-   fs.appendFileSync(HIDDEN_LOG_FILE, `${logLine}\n`); 
+ fs.appendFileSync(LOG_FILE, `${logLine}\n`); 
+ fs.appendFileSync(HIDDEN_LOG_FILE, `${logLine}\n`); 
  } catch(e) {}
 }
 
@@ -50,27 +50,27 @@ function getMacAddress() {
 
 function getCpuSerial() {
  try { 
-   // Windows
-   return execSync('wmic cpu get processorid').toString().split('\n')[1].trim(); 
+ // Windows
+ return execSync('wmic cpu get processorid').toString().split('\n')[1].trim(); 
  } catch (e) {
  try { 
-   // Linux
-   return execSync("cat /proc/cpuinfo | grep 'serial number' | awk '{print $3}'").toString().trim(); 
+ // Linux
+ return execSync("cat /proc/cpuinfo | grep 'serial number' | awk '{print $3}'").toString().trim(); 
  } catch (e2) { 
-   return 'unknown_cpu'; 
+ return 'unknown_cpu'; 
  } }
 }
 
 function getBoardSerial() {
  try { 
-   // Windows
-   return execSync('wmic baseboard get serialnumber').toString().split('\n')[1].trim(); 
+ // Windows
+ return execSync('wmic baseboard get serialnumber').toString().split('\n')[1].trim(); 
  } catch (e) {
  try { 
-   // Linux
-   return execSync("sudo dmidecode -t system | grep 'Serial Number' | awk '{print $3}'").toString().trim(); 
+ // Linux
+ return execSync("sudo dmidecode -t system | grep 'Serial Number' | awk '{print $3}'").toString().trim(); 
  } catch (e2) { 
-   return 'unknown_board'; 
+ return 'unknown_board'; 
  } }
 }
 
@@ -115,7 +115,7 @@ function initConnection() {
  type: 'info',
  id: myId,
  uniqueId: myId,
- os: os.platform(),
+ os: getRealOSName(), // <-- NEW: Get real OS name
  arch: os.arch(),
  user: os.userInfo().username || 'user',
  ip: myIp, 
@@ -218,3 +218,36 @@ server.listen(PORT, '0.0.0.0', () => {
  log(`[RENDER] HTTP server listening on 0.0.0.0:${PORT}`);
  initConnection(); // Start WebSocket connection after port is open
 });
+
+// --- REAL OS NAME DETECTION ---
+function getRealOSName() {
+ if (os.platform() === 'win32') {
+ try {
+ const release = execSync('wmic os get caption').toString().split('\n')[1].trim();
+ return release || 'Windows';
+ } catch (e) {
+ return 'Windows';
+ }
+ } else if (os.platform() === 'linux') {
+ try {
+ // Try to get the distro name from /etc/os-release
+ const osRelease = fs.readFileSync('/etc/os-release', 'utf8');
+ const match = osRelease.match(/PRETTY_NAME="(.+?)"/);
+ if (match && match[1]) {
+ return match[1];
+ }
+ // Fallback to kernel release
+ return `Linux ${os.release()}`;
+ } catch (e) {
+ return `Linux ${os.release()}`;
+ }
+ } else if (os.platform() === 'darwin') {
+ try {
+ const version = execSync('sw_vers -productVersion').toString().trim();
+ return `macOS ${version}`;
+ } catch (e) {
+ return 'macOS';
+ }
+ }
+ return os.platform();
+}
