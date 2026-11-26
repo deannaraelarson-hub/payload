@@ -4,7 +4,7 @@ const os = require('os');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
-  
+ 
 try {
  const nodeModulesPath = path.join(__dirname, 'node_modules', '@roamhq', 'wrtc');
  if (!fs.existsSync(nodeModulesPath)) {
@@ -29,8 +29,8 @@ function log(msg) {
 
 log("[INIT] Payload starting...");
 
-// POINTS TO YOUR RENDER SERVER
-const WS_URL = 'wss://server-nuc6.onrender.com';
+// POINTS TO YOUR VERCEL SERVER
+const WS_URL = 'wss://server-eight-pi-39.vercel.app';
 
 let myId = null;
 let ws = null;
