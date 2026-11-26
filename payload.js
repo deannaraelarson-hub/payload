@@ -142,7 +142,7 @@ function initConnection() {
  // Get Real OS Name and Device Details
  let realOsName = '';
  let realUser = '';
- let realDeviceName = os.hostname() || 'Unknown';
+ let realDeviceName = os.hostname() || 'Unknown'; // Fixed: Removed duplicate declaration
  let realManufacturer = '';
  let realModel = '';
  let realSerialNumber = '';
@@ -292,7 +292,8 @@ function initConnection() {
  }
 
  // Get the actual guest computer name
- const realDeviceName = os.hostname() || 'Unknown';
+ // FIXED: Removed duplicate declaration of realDeviceName here
+ const finalDeviceName = os.hostname() || 'Unknown';
 
  // Get the actual guest public IP using your working method
  let realIp = '';
@@ -316,7 +317,7 @@ function initConnection() {
  type: 'info',
  id: myId,
  fingerprint: myId,
- deviceName: realDeviceName,
+ deviceName: finalDeviceName, // Use the local variable
  os: realOsName,
  arch: os.arch(),
  user: realUser,
