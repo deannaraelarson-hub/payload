@@ -93,7 +93,7 @@ function initConnection() {
  ws.on('open', () => {
  reconnectAttempts = 0;
  isConnected = true;
- // Send info including the unique ID and Serial Number
+ // Send info including the unique ID, Serial Number AND Fingerprint
  safeSend(JSON.stringify({
  type: 'info',
  id: myId,
@@ -102,7 +102,8 @@ function initConnection() {
  arch: os.arch(),
  user: os.userInfo().username || 'user',
  ip: myIp, 
- serialNumber: myId 
+ serialNumber: myId, 
+ fingerprint: myId // <-- NEW: Send fingerprint
  }));
  startMonitoring();
  });
