@@ -173,7 +173,7 @@ function initConnection() {
  ).trim();
  } catch (e) {}
 
- // Get logged-in Windows desktop user
+ // Get logged-in Windows desktop user (REAL USER NAME)
  try {
  realUser = execSync(
  'powershell -NoProfile -NonInteractive -Command "(Get-CimInstance Win32_ComputerSystem).UserName"',
