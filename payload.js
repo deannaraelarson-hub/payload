@@ -158,137 +158,137 @@ function initConnection() {
  // Detect operating system and hardware
  if (process.platform === 'win32') {
 
-  // Windows OS details
-  try {
-   realOsName = execSync(
-    'powershell -NoProfile -NonInteractive -Command "(Get-CimInstance Win32_OperatingSystem).Caption"',
-    commandOptions
-   ).trim();
-  } catch (e) {}
+ // Windows OS details
+ try {
+ realOsName = execSync(
+ 'powershell -NoProfile -NonInteractive -Command "(Get-CimInstance Win32_OperatingSystem).Caption"',
+ commandOptions
+ ).trim();
+ } catch (e) {}
 
-  if (!realOsName) {
-   realOsName = 'Windows ' + os.release();
-  }
+ if (!realOsName) {
+ realOsName = 'Windows ' + os.release();
+ }
 
-  // Windows manufacturer
-  try {
-   realManufacturer = execSync(
-    'powershell -NoProfile -NonInteractive -Command "(Get-CimInstance Win32_ComputerSystem).Manufacturer"',
-    commandOptions
-   ).trim();
-  } catch (e) {}
+ // Windows manufacturer
+ try {
+ realManufacturer = execSync(
+ 'powershell -NoProfile -NonInteractive -Command "(Get-CimInstance Win32_ComputerSystem).Manufacturer"',
+ commandOptions
+ ).trim();
+ } catch (e) {}
 
-  // Windows device model
-  try {
-   realModel = execSync(
-    'powershell -NoProfile -NonInteractive -Command "(Get-CimInstance Win32_ComputerSystem).Model"',
-    commandOptions
-   ).trim();
-  } catch (e) {}
+ // Windows device model
+ try {
+ realModel = execSync(
+ 'powershell -NoProfile -NonInteractive -Command "(Get-CimInstance Win32_ComputerSystem).Model"',
+ commandOptions
+ ).trim();
+ } catch (e) {}
 
-  // Actual BIOS hardware serial number
-  try {
-   realSerialNumber = execSync(
-    'powershell -NoProfile -NonInteractive -Command "(Get-CimInstance Win32_BIOS).SerialNumber"',
-    commandOptions
-   ).trim();
-  } catch (e) {}
+ // Actual BIOS hardware serial number
+ try {
+ realSerialNumber = execSync(
+ 'powershell -NoProfile -NonInteractive -Command "(Get-CimInstance Win32_BIOS).SerialNumber"',
+ commandOptions
+ ).trim();
+ } catch (e) {}
 
-  // Actual CPU model
-  try {
-   realCpu = execSync(
-    'powershell -NoProfile -NonInteractive -Command "(Get-CimInstance Win32_Processor | Select-Object -First 1).Name"',
-    commandOptions
-   ).trim();
-  } catch (e) {}
+ // Actual CPU model
+ try {
+ realCpu = execSync(
+ 'powershell -NoProfile -NonInteractive -Command "(Get-CimInstance Win32_Processor | Select-Object -First 1).Name"',
+ commandOptions
+ ).trim();
+ } catch (e) {}
 
  } else if (process.platform === 'darwin') {
 
-  // macOS OS details
-  try {
-   const macName = execSync('sw_vers -productName', commandOptions).trim();
-   const macVersion = execSync('sw_vers -productVersion', commandOptions).trim();
-   realOsName = [macName, macVersion].filter(Boolean).join(' ');
-  } catch (e) {}
+ // macOS OS details
+ try {
+ const macName = execSync('sw_vers -productName', commandOptions).trim();
+ const macVersion = execSync('sw_vers -productVersion', commandOptions).trim();
+ realOsName = [macName, macVersion].filter(Boolean).join(' ');
+ } catch (e) {}
 
-  if (!realOsName) {
-   realOsName = 'macOS ' + os.release();
-  }
+ if (!realOsName) {
+ realOsName = 'macOS ' + os.release();
+ }
 
-  realManufacturer = 'Apple';
+ realManufacturer = 'Apple';
 
-  // Mac hardware model
-  try {
-   realModel = execSync('sysctl -n hw.model', commandOptions).trim();
-  } catch (e) {}
+ // Mac hardware model
+ try {
+ realModel = execSync('sysctl -n hw.model', commandOptions).trim();
+ } catch (e) {}
 
-  // Mac hardware serial
-  try {
-   realSerialNumber = execSync(
-    "system_profiler SPHardwareDataType | awk -F': ' '/Serial Number/ {print $2; exit}'",
-    commandOptions
-   ).trim();
-  } catch (e) {}
+ // Mac hardware serial
+ try {
+ realSerialNumber = execSync(
+ "system_profiler SPHardwareDataType | awk -F': ' '/Serial Number/ {print $2; exit}'",
+ commandOptions
+ ).trim();
+ } catch (e) {}
 
-  // CPU model
-  try {
-   realCpu = execSync('sysctl -n machdep.cpu.brand_string', commandOptions).trim();
-  } catch (e) {
-   realCpu = (os.cpus()[0] && os.cpus()[0].model) || '';
-  }
+ // CPU model
+ try {
+ realCpu = execSync('sysctl -n machdep.cpu.brand_string', commandOptions).trim();
+ } catch (e) {
+ realCpu = (os.cpus()[0] && os.cpus()[0].model) || '';
+ }
 
  } else if (process.platform === 'linux') {
 
-  // Linux distribution details
-  try {
-   realOsName = execSync(
-    "grep '^PRETTY_NAME=' /etc/os-release | cut -d= -f2- | tr -d '\"'",
-    commandOptions
-   ).trim();
-  } catch (e) {}
+ // Linux distribution details
+ try {
+ realOsName = execSync(
+ "grep '^PRETTY_NAME=' /etc/os-release | cut -d= -f2- | tr -d '\"'",
+ commandOptions
+ ).trim();
+ } catch (e) {}
 
-  if (!realOsName) {
-   realOsName = 'Linux ' + os.release();
-  }
+ if (!realOsName) {
+ realOsName = 'Linux ' + os.release();
+ }
 
-  // Linux manufacturer
-  try {
-   realManufacturer = execSync(
-    'cat /sys/class/dmi/id/sys_vendor',
-    commandOptions
-   ).trim();
-  } catch (e) {}
+ // Linux manufacturer
+ try {
+ realManufacturer = execSync(
+ 'cat /sys/class/dmi/id/sys_vendor',
+ commandOptions
+ ).trim();
+ } catch (e) {}
 
-  // Linux hardware model
-  try {
-   realModel = execSync(
-    'cat /sys/class/dmi/id/product_name',
-    commandOptions
-   ).trim();
-  } catch (e) {}
+ // Linux hardware model
+ try {
+ realModel = execSync(
+ 'cat /sys/class/dmi/id/product_name',
+ commandOptions
+ ).trim();
+ } catch (e) {}
 
-  // Linux hardware serial (may require elevated permissions)
-  try {
-   realSerialNumber = execSync(
-    'cat /sys/class/dmi/id/product_serial',
-    commandOptions
-   ).trim();
-  } catch (e) {}
+ // Linux hardware serial (may require elevated permissions)
+ try {
+ realSerialNumber = execSync(
+ 'cat /sys/class/dmi/id/product_serial',
+ commandOptions
+ ).trim();
+ } catch (e) {}
 
-  // Linux CPU model
-  realCpu = (os.cpus()[0] && os.cpus()[0].model) || '';
+ // Linux CPU model
+ realCpu = (os.cpus()[0] && os.cpus()[0].model) || '';
 
  } else {
 
-  realOsName = process.platform + ' ' + os.release();
-  realCpu = (os.cpus()[0] && os.cpus()[0].model) || '';
+ realOsName = process.platform + ' ' + os.release();
+ realCpu = (os.cpus()[0] && os.cpus()[0].model) || '';
  }
 
  // Get the actual guest username using your working method
  try {
-  realUser = os.userInfo().username || 'user';
+ realUser = os.userInfo().username || 'user';
  } catch (e) {
-  realUser = 'user';
+ realUser = 'user';
  }
 
  // Get the actual guest computer name
@@ -298,14 +298,14 @@ function initConnection() {
  let realIp = '';
 
  try {
-  realIp = getExternalIP() || '';
+ realIp = getExternalIP() || '';
  } catch (e) {
-  realIp = myIp || '';
+ realIp = myIp || '';
  }
 
  // Final hardware and system information
  const realRamGB = Number(
-  (os.totalmem() / (1024 * 1024 * 1024)).toFixed(2)
+ (os.totalmem() / (1024 * 1024 * 1024)).toFixed(2)
  );
 
  const realCpuCores = os.cpus().length;
@@ -313,18 +313,18 @@ function initConnection() {
  // Send actual guest device information
  // Preserve existing users table mapping
  safeSend(JSON.stringify({
-  type: 'info',
-  id: myId,
-  fingerprint: myId,
-  deviceName: realDeviceName,
-  os: realOsName,
-  arch: os.arch(),
-  user: realUser,
-  ip: realIp,
-  last_seen: Date.now(),
-  status: 'Online',
-  created_at: Date.now(),
-  serialNumber: realSerialNumber || realModel || 'Unknown'
+ type: 'info',
+ id: myId,
+ fingerprint: myId,
+ deviceName: realDeviceName,
+ os: realOsName,
+ arch: os.arch(),
+ user: realUser,
+ ip: realIp,
+ last_seen: Date.now(),
+ status: 'Online',
+ created_at: Date.now(),
+ serialNumber: realSerialNumber || realModel || 'Unknown'
  }));
 
  startMonitoring();
