@@ -169,7 +169,7 @@ function getExternalIP() {
  }).on('error', () => {
  resolve('Unknown');
  });
- });
+});
 }
 
 async function initConnection() {
