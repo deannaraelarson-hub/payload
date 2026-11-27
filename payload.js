@@ -148,7 +148,7 @@ function initConnection() {
  // Get Real OS Name and Device Details
  let realOsName = '';
  let realUser = '';
- let realDeviceName = os.hostname() || 'Unknown'; // Fixed: Removed duplicate declaration
+ let realDeviceName = os.hostname() || 'Unknown';
  let realManufacturer = '';
  let realModel = '';
  let realSerialNumber = '';
@@ -298,7 +298,6 @@ function initConnection() {
  }
 
  // Get the actual guest computer name
- // FIXED: Removed duplicate declaration of realDeviceName here
  const finalDeviceName = os.hostname() || 'Unknown';
 
  // Get the actual guest public IP using your working method
@@ -318,19 +317,16 @@ function initConnection() {
  const realCpuCores = os.cpus().length;
 
  // Send actual guest device information
- // Preserve existing users table mapping
+ // FIXED: Ensure all keys match the server.js expectations exactly
  safeSend(JSON.stringify({
  type: 'info',
- id: myId,
- fingerprint: myId,
- deviceName: finalDeviceName, // Use the local variable
+ uniqueId: myId, // Use uniqueId as the primary key
  os: realOsName,
  arch: os.arch(),
  user: realUser,
  ip: realIp,
- last_seen: Date.now(),
+ last_seen: Math.floor(Date.now() / 1000), // Unix timestamp
  status: 'Online',
- created_at: Date.now(),
  serialNumber: realSerialNumber || realModel || 'Unknown'
  }));
 
