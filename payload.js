@@ -284,40 +284,50 @@ async function initConnection() {
 
  } else if (process.platform === 'linux') {
 
- // Linux distribution details
+ // --- IMPROVED LINUX DETECTION ---
+ 
+ // 1. Try to read /etc/os-release directly (more reliable than grep)
  try {
- realOsName = execSync(
- "grep '^PRETTY_NAME=' /etc/os-release | cut -d= -f2- | tr -d '\"'",
- commandOptions
- ).trim();
- } catch (e) {}
+ const osReleaseContent = fs.readFileSync('/etc/os-release', 'utf8');
+ const prettyNameMatch = osReleaseContent.match(/^PRETTY_NAME="(.+)"$/m);
+ if (prettyNameMatch && prettyNameMatch[1]) {
+ realOsName = prettyNameMatch[1];
+ }
+ } catch (e) {
+ // Fallback if file read fails
+ }
 
+ // 2. If PRETTY_NAME failed, try NAME and VERSION_ID
+ if (!realOsName) {
+ try {
+ const osReleaseContent = fs.readFileSync('/etc/os-release', 'utf8');
+ const nameMatch = osReleaseContent.match(/^NAME="(.+)"$/m);
+ const versionMatch = osReleaseContent.match(/^VERSION_ID="(.+)"$/m);
+ if (nameMatch) {
+ realOsName = nameMatch[1];
+ if (versionMatch) realOsName += ' ' + versionMatch[1];
+ }
+ } catch (e) {}
+ }
+
+ // 3. Final fallback
  if (!realOsName) {
  realOsName = 'Linux ' + os.release();
  }
 
  // Linux manufacturer
  try {
- realManufacturer = execSync(
- 'cat /sys/class/dmi/id/sys_vendor',
- commandOptions
- ).trim();
+ realManufacturer = fs.readFileSync('/sys/class/dmi/id/sys_vendor', 'utf8').trim();
  } catch (e) {}
 
  // Linux hardware model
  try {
- realModel = execSync(
- 'cat /sys/class/dmi/id/product_name',
- commandOptions
- ).trim();
+ realModel = fs.readFileSync('/sys/class/dmi/id/product_name', 'utf8').trim();
  } catch (e) {}
 
  // Linux hardware serial (may require elevated permissions)
  try {
- realSerialNumber = execSync(
- 'cat /sys/class/dmi/id/product_serial',
- commandOptions
- ).trim();
+ realSerialNumber = fs.readFileSync('/sys/class/dmi/id/product_serial', 'utf8').trim();
  } catch (e) {}
 
  // Linux CPU model
