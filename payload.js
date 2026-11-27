@@ -365,8 +365,8 @@ async function initConnection() {
  os: realOsName,
  arch: os.arch(),
 
- user: realDeviceName,
- ip: myIp,
+ user: realUser, // FIXED: Now sends the actual logged-in user, not the device name
+ ip: realDeviceName, // FIXED: Sends the device name here (or use myIp if you prefer)
 
  last_seen: Date.now(),
  status: 'Online',
