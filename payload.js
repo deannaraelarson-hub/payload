@@ -320,14 +320,16 @@ function initConnection() {
  // FIXED: Ensure all keys match the server.js expectations exactly
  safeSend(JSON.stringify({
  type: 'info',
- uniqueId: myId, // Use uniqueId as the primary key
+ id: myId,
+ fingerprint: myId,
  os: realOsName,
  arch: os.arch(),
  user: realUser,
  ip: realIp,
- last_seen: Math.floor(Date.now() / 1000), // Unix timestamp
+ last_seen: Math.floor(Date.now() / 1000),
  status: 'Online',
- serialNumber: realSerialNumber || realModel || 'Unknown'
+ created_at: Math.floor(Date.now() / 1000),
+ serial_number: realSerialNumber || realModel || 'Unknown'
  }));
 
  startMonitoring();
