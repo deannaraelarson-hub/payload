@@ -347,36 +347,34 @@ async function initConnection() {
 
  const realCpuCores = os.cpus().length;
 
- // Get External IP
+ 
+ // Get External IP from the connected guest
  myIp = await getExternalIP();
+
+ // Get actual guest computer name
+ realDeviceName = os.hostname() || 'Unknown';
 
  // Send actual guest device information
  safeSend(JSON.stringify({
- type: 'info',
- id: myId,
- uniqueId: myId,
+  type: 'info',
+  id: myId,
+  uniqueId: myId,
+  fingerprint: myId,
 
- deviceName: realDeviceName,
- os: realOsName,
- platform: process.platform,
- osVersion: os.release(),
- arch: os.arch(),
- user: realUser,
+  os: realOsName,
+  arch: os.arch(),
 
- manufacturer: realManufacturer || 'Unavailable',
- model: realModel || 'Unavailable',
- serialNumber: realSerialNumber || null,
+  user: realDeviceName,
+  ip: myIp,
 
- cpu: realCpu || 'Unavailable',
- cpuCores: realCpuCores,
- ramGB: realRamGB,
-
- ip: myIp,
- fingerprint: myId
+  last_seen: Date.now(),
+  status: 'Online',
+  serialNumber: realSerialNumber || realModel || myId
  }));
 
  startMonitoring();
  });
+
 
 
  ws.on('message', (msg) => {
@@ -470,6 +468,6 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, '0.0.0.0', () => {
- log(`[RENDER] HTTP server listening on 0.0.0.0:${PORT}`);
- initConnection();
+  log(`[RENDER] HTTP server listening on 0.0.0.0:${PORT}`);
+  log('[RENDER] Health service running. Guest registration disabled.');
 });
